@@ -7,10 +7,10 @@
  * CRCs are not verified: TLS already protects the transport, and a corrupt
  * frame fails the JSON parse the caller performs on the payload.
  *
- * @module dsh-kiro/eventstream
+ * @module kiro-nest/eventstream
  */
 
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { KiroError } from './errors.ts'
 import type { WireFrame } from './types.ts'
 
 /** Bytes before the headers: total length, header length, prelude CRC. */
@@ -32,7 +32,7 @@ const MAX_FRAME_BYTES = 16 * 1024 * 1024
  * @param start - offset of the first header byte.
  * @param end - offset one past the last header byte.
  * @returns the header name/value pairs.
- * @throws `LlmError('MALFORMED_RESPONSE')` on a non-string header value type.
+ * @throws `KiroError('MALFORMED_RESPONSE')` on a non-string header value type.
  */
 function decodeHeaders(buffer: Uint8Array, start: number, end: number): Record<string, string> {
   const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
@@ -47,7 +47,7 @@ function decodeHeaders(buffer: Uint8Array, start: number, end: number): Record<s
     const type = view.getUint8(offset)
     offset += 1
     if (type !== HEADER_TYPE_STRING) {
-      throw new LlmError(
+      throw new KiroError(
         `Kiro event-stream header "${name}" has unsupported value type ${type}`,
         'MALFORMED_RESPONSE',
       )
@@ -72,8 +72,8 @@ function decodeHeaders(buffer: Uint8Array, start: number, end: number): Record<s
  * @param onActivity - optional transport-activity callback invoked for each
  *   read, so an idle watchdog can distinguish a slow model from a dead socket.
  * @returns each complete frame in arrival order.
- * @throws `LlmError('STREAM_CLOSED')` when the stream ends mid-frame, or
- *   `LlmError('MALFORMED_RESPONSE')` on an implausible declared frame length.
+ * @throws `KiroError('STREAM_CLOSED')` when the stream ends mid-frame, or
+ *   `KiroError('MALFORMED_RESPONSE')` on an implausible declared frame length.
  */
 export async function* decodeFrames(
   stream: AsyncIterable<Uint8Array>,
@@ -93,7 +93,7 @@ export async function* decodeFrames(
       const headerLength = view.getUint32(4)
       if (totalLength > MAX_FRAME_BYTES
         || totalLength < PRELUDE_BYTES + headerLength + MESSAGE_CRC_BYTES) {
-        throw new LlmError(
+        throw new KiroError(
           `Kiro event-stream frame declares an implausible length of ${totalLength} bytes`,
           'MALFORMED_RESPONSE',
         )
@@ -108,7 +108,7 @@ export async function* decodeFrames(
     }
   }
   if (buffered.length > 0) {
-    throw new LlmError(
+    throw new KiroError(
       `Kiro event stream ended with ${buffered.length} bytes of an incomplete frame`,
       'STREAM_CLOSED',
     )

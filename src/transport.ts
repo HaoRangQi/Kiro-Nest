@@ -8,7 +8,7 @@
  * TLS negotiated inside it — so the proxy support costs no dependency, and
  * proxy and direct requests differ only in how the socket is obtained.
  *
- * @module dsh-kiro/transport
+ * @module kiro-nest/transport
  */
 
 import { request as httpRequest } from 'node:http'
@@ -16,7 +16,7 @@ import { request as httpsRequest } from 'node:https'
 import { connect as tlsConnect } from 'node:tls'
 import type { Socket } from 'node:net'
 import type { IncomingMessage } from 'node:http'
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { KiroError } from './errors.ts'
 
 /** Default port for each supported proxy scheme. */
 const PROXY_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
@@ -85,7 +85,7 @@ export function parseProxyUrl(raw: string): URL {
  * @param port - target port.
  * @param signal - caller cancellation.
  * @returns the tunneled socket, ready for TLS.
- * @throws `LlmError('TRANSPORT')` when the proxy refuses or the connection fails.
+ * @throws `KiroError('TRANSPORT')` when the proxy refuses or the connection fails.
  */
 function openTunnel(proxy: URL, host: string, port: number, signal: AbortSignal): Promise<Socket> {
   return new Promise((resolve, reject) => {
@@ -110,7 +110,7 @@ function openTunnel(proxy: URL, host: string, port: number, signal: AbortSignal)
     request.once('connect', (response: IncomingMessage, socket: Socket) => {
       if (response.statusCode !== 200) {
         socket.destroy()
-        reject(new LlmError(
+        reject(new KiroError(
           `Kiro proxy ${proxy.host} refused CONNECT with HTTP ${String(response.statusCode)}`,
           'TRANSPORT',
         ))
@@ -119,7 +119,7 @@ function openTunnel(proxy: URL, host: string, port: number, signal: AbortSignal)
       resolve(socket)
     })
     request.once('error', (error: Error) => {
-      reject(new LlmError(`Kiro proxy ${proxy.host} connection failed`, 'TRANSPORT', { cause: error }))
+      reject(new KiroError(`Kiro proxy ${proxy.host} connection failed`, 'TRANSPORT', { cause: error }))
     })
     request.end()
   })
@@ -130,8 +130,8 @@ function openTunnel(proxy: URL, host: string, port: number, signal: AbortSignal)
  * caller streams the body itself.
  * @param options - target, headers, body, cancellation, and optional proxy.
  * @returns status, headers, and the body byte stream.
- * @throws `LlmError('TRANSPORT')` on a pre-response transport failure, or
- *   `LlmError('ABORTED')` when the caller cancelled first.
+ * @throws `KiroError('TRANSPORT')` on a pre-response transport failure, or
+ *   `KiroError('ABORTED')` when the caller cancelled first.
  */
 async function send(options: WireRequest): Promise<TransportResponse> {
   const target = new URL(options.url)
@@ -167,10 +167,10 @@ async function send(options: WireRequest): Promise<TransportResponse> {
     request.once('error', (error: Error) => {
       tunnel?.destroy()
       if (options.signal.aborted) {
-        reject(new LlmError('Kiro request aborted by caller', 'ABORTED', { cause: error }))
+        reject(new KiroError('Kiro request aborted by caller', 'ABORTED', { cause: error }))
         return
       }
-      reject(new LlmError(`Kiro request to ${target.host} failed`, 'TRANSPORT', { cause: error }))
+      reject(new KiroError(`Kiro request to ${target.host} failed`, 'TRANSPORT', { cause: error }))
     })
     request.end(options.body)
   })

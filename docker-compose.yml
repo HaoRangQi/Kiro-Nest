@@ -1,0 +1,24 @@
+services:
+  kiro-nest:
+    build: .
+    image: kiro-nest:latest
+    container_name: kiro-nest
+    restart: unless-stopped
+    ports:
+      # 容器内固定监听 8787；如需改端口，同时修改这里的映射和
+      # KIRO_NEST_PORT 环境变量，然后重建容器。
+      - "${KIRO_NEST_HOST_PORT:-8787}:8787"
+    environment:
+      KIRO_NEST_PORT: "8787"
+      KIRO_NEST_HOST: "0.0.0.0"
+      KIRO_NEST_DATA_DIR: "/data"
+      # 公网部署时强烈建议设置以下两个密钥：
+      # KIRO_NEST_API_KEY: "change-me"
+      # KIRO_NEST_ADMIN_TOKEN: "change-me-too"
+      # 可选出站代理：
+      # KIRO_NEST_PROXY_URL: "http://host.docker.internal:7890"
+    volumes:
+      - kiro-nest-data:/data
+
+volumes:
+  kiro-nest-data:

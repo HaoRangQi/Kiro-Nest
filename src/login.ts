@@ -1,4 +1,4 @@
-/** Multi-method Kiro login and DSH-owned credential persistence. */
+/** Multi-method Kiro login and gateway-owned credential persistence. */
 
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
@@ -550,7 +550,7 @@ function credentialRecordOf(
 }
 
 /**
- * Save any normalized credential beneath DSH home with private permissions.
+ * Save any normalized credential beneath the gateway data directory with private permissions.
  *
  * The account store is the authority; the single-credential file is kept in
  * step because the `kiro-login` CLI and external tooling read it.

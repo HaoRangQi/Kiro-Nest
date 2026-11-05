@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { KiroError } from './errors.ts'
 import { KiroAccountStore } from './accounts.ts'
 import { assertMicrosoftTokenEndpoint } from './external-idp.ts'
 import { assertKiroProfileArn } from './profile.ts'
@@ -184,7 +184,7 @@ export function kiroAuthMethod(
 
 function normalizeTokenFile(value: unknown): TokenFile {
   const source = record(value)
-  if (source === undefined) throw new LlmError('Kiro token file is not a JSON object', 'INVALID_CREDENTIAL')
+  if (source === undefined) throw new KiroError('Kiro token file is not a JSON object', 'INVALID_CREDENTIAL')
   const accessToken = text(source.accessToken ?? source.access_token)
   const refreshToken = text(source.refreshToken ?? source.refresh_token)
   const expiresAt = text(source.expiresAt ?? source.expires_at ?? source.expired)
@@ -219,14 +219,14 @@ async function readJsonFile(path: string, what: string): Promise<unknown> {
     value = await readFile(path, 'utf8')
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new LlmError(`Kiro ${what} not found at ${path}`, 'MISSING_CREDENTIAL', { cause: error })
+      throw new KiroError(`Kiro ${what} not found at ${path}`, 'MISSING_CREDENTIAL', { cause: error })
     }
-    throw new LlmError(`Kiro ${what} at ${path} could not be read`, 'INVALID_CREDENTIAL', { cause: error })
+    throw new KiroError(`Kiro ${what} at ${path} could not be read`, 'INVALID_CREDENTIAL', { cause: error })
   }
   try {
     return JSON.parse(value) as unknown
   } catch (error: unknown) {
-    throw new LlmError(`Kiro ${what} at ${path} is not valid JSON`, 'INVALID_CREDENTIAL', { cause: error })
+    throw new KiroError(`Kiro ${what} at ${path} is not valid JSON`, 'INVALID_CREDENTIAL', { cause: error })
   }
 }
 
@@ -250,7 +250,7 @@ function parseRefresh(body: unknown, fallbackRefreshToken: string): {
 } {
   const value = record(body) as RefreshResponse | undefined
   const accessToken = text(value?.accessToken ?? value?.access_token)
-  if (accessToken === undefined) throw new LlmError('Kiro token refresh returned no access token', 'AUTH')
+  if (accessToken === undefined) throw new KiroError('Kiro token refresh returned no access token', 'AUTH')
   const lifetime = Math.max(1, numeric(value?.expiresIn ?? value?.expires_in) ?? 3600)
   const rawProfile = text(value?.profileArn ?? value?.profile_arn)
   return {
@@ -266,7 +266,7 @@ async function registration(directory: string, hash: string): Promise<Registrati
   const clientId = text(value?.clientId ?? value?.client_id)
   const clientSecret = text(value?.clientSecret ?? value?.client_secret)
   if (clientId === undefined || clientSecret === undefined) {
-    throw new LlmError('Kiro device registration is missing its client id or secret', 'INVALID_CREDENTIAL')
+    throw new KiroError('Kiro device registration is missing its client id or secret', 'INVALID_CREDENTIAL')
   }
   return { clientId, clientSecret }
 }
@@ -279,15 +279,15 @@ async function refresh(
 ): Promise<{ token: KiroToken; refreshToken: string }> {
   const refreshToken = token.refreshToken
   if (refreshToken === undefined) {
-    throw new LlmError('Kiro credential has expired and carries no refresh token', 'INVALID_CREDENTIAL')
+    throw new KiroError('Kiro credential has expired and carries no refresh token', 'INVALID_CREDENTIAL')
   }
   let response: { status: number; body: unknown }
   if (token.authMethod === 'external_idp') {
     if (token.clientId === undefined || token.tokenEndpoint === undefined || token.scope === undefined) {
-      throw new LlmError('Kiro external IdP credential is missing client, endpoint, or scopes', 'INVALID_CREDENTIAL')
+      throw new KiroError('Kiro external IdP credential is missing client, endpoint, or scopes', 'INVALID_CREDENTIAL')
     }
     if (options.fetchForm === undefined) {
-      throw new LlmError('Kiro external IdP refresh transport is unavailable', 'INVALID_CREDENTIAL')
+      throw new KiroError('Kiro external IdP refresh transport is unavailable', 'INVALID_CREDENTIAL')
     }
     response = await options.fetchForm(
       assertMicrosoftTokenEndpoint(token.tokenEndpoint),
@@ -311,14 +311,14 @@ async function refresh(
     // refresh token alone; there is no client registration to look for.
     response = await options.fetchJson(SOCIAL_REFRESH_URL, { refreshToken })
   } else {
-    throw new LlmError(
+    throw new KiroError(
       `Kiro ${token.authMethod} credential cannot be refreshed without its client registration; `
       + 'sign in through the Kiro settings page to store a refreshable credential',
       'INVALID_CREDENTIAL',
     )
   }
   if (response.status !== 200) {
-    throw new LlmError(`Kiro token refresh failed: ${refreshDetail(response.body, response.status)}`, 'AUTH', {
+    throw new KiroError(`Kiro token refresh failed: ${refreshDetail(response.body, response.status)}`, 'AUTH', {
       status: response.status,
     })
   }
@@ -399,13 +399,13 @@ async function resolveFromSource(source: TokenSource, options: TokenSourceOption
   try {
     region = assertKiroRegion(file.region ?? DEFAULT_REGION)
   } catch (error: unknown) {
-    throw new LlmError('Kiro token file contains an invalid AWS region', 'INVALID_CREDENTIAL', { cause: error })
+    throw new KiroError('Kiro token file contains an invalid AWS region', 'INVALID_CREDENTIAL', { cause: error })
   }
   let profileArn: string | undefined
   try {
     profileArn = file.profileArn === undefined ? undefined : assertKiroProfileArn(file.profileArn)
   } catch (error: unknown) {
-    throw new LlmError('Kiro token file contains an invalid profile ARN', 'INVALID_CREDENTIAL', { cause: error })
+    throw new KiroError('Kiro token file contains an invalid profile ARN', 'INVALID_CREDENTIAL', { cause: error })
   }
   const fileExpiry = file.authMethod === 'api_key'
     ? NON_EXPIRING
@@ -446,7 +446,7 @@ export async function resolveToken(options: TokenSourceOptions): Promise<KiroTok
   }, options)
 }
 
-/** Resolve the first present source, preferring DSH-managed credentials over Kiro's cache. */
+/** Resolve the first present source, preferring gateway-managed credentials over Kiro's cache. */
 export async function resolveTokenFromDirectories(
   directories: readonly string[],
   options: DirectoryTokenSourceOptions,
@@ -484,7 +484,7 @@ export async function resolveTokenFromDirectories(
     }
   }
   if (lastMissing !== undefined) throw lastMissing
-  throw new LlmError('No Kiro credential sources were configured', 'MISSING_CREDENTIAL')
+  throw new KiroError('No Kiro credential sources were configured', 'MISSING_CREDENTIAL')
 }
 
 /**
@@ -496,7 +496,7 @@ export async function resolveTokenFromDirectories(
  * @param options - refresh transports and the profile expiry buffer.
  * @param accountId - the account to use; the active one when omitted.
  * @returns the token requests and discovery authenticate with.
- * @throws LlmError('MISSING_CREDENTIAL') when the store holds no such account.
+ * @throws KiroError('MISSING_CREDENTIAL') when the store holds no such account.
  */
 export async function resolveTokenFromStore(
   store: KiroAccountStore,
@@ -514,7 +514,7 @@ export async function resolveTokenFromStore(
  * @param accountId - the account to use; the active one when omitted.
  * @param persist - whether a rotated credential may be written to disk.
  * @returns the token requests and discovery authenticate with.
- * @throws LlmError('MISSING_CREDENTIAL') when the store holds no such account.
+ * @throws KiroError('MISSING_CREDENTIAL') when the store holds no such account.
  */
 async function resolveStoredAccount(
   store: KiroAccountStore,
@@ -524,7 +524,7 @@ async function resolveStoredAccount(
 ): Promise<KiroToken> {
   const captured = await store.capture(accountId)
   if (captured === null) {
-    throw new LlmError('Kiro has no signed-in account; add one in Settings, Kiro', 'MISSING_CREDENTIAL')
+    throw new KiroError('Kiro has no signed-in account; add one in Settings, Kiro', 'MISSING_CREDENTIAL')
   }
   return resolveFromSource({
     key: store.directory + '\u0000' + captured.accountId,
@@ -532,7 +532,7 @@ async function resolveStoredAccount(
     read: async () => {
       const credential = await captured.read()
       if (credential === undefined) {
-        throw new LlmError('Kiro account ' + captured.accountId + ' is no longer stored', 'MISSING_CREDENTIAL')
+        throw new KiroError('Kiro account ' + captured.accountId + ' is no longer stored', 'MISSING_CREDENTIAL')
       }
       return credential
     },

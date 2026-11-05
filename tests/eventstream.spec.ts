@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { KiroError } from '../src/errors.ts'
 import { decodeFrames } from '../src/eventstream.ts'
 import { chunked, frame, join, textFrame } from './frames.ts'
 
@@ -56,7 +56,7 @@ describe('decodeFrames', () => {
     const tampered = Uint8Array.from(legal)
     // The type tag sits after the 12-byte prelude, the 1-byte name length, and the name.
     tampered[12 + 1 + ':event-type'.length] = 0
-    await expect(decode(chunked(tampered, 4096))).rejects.toBeInstanceOf(LlmError)
+    await expect(decode(chunked(tampered, 4096))).rejects.toBeInstanceOf(KiroError)
   })
 
   it('reports transport activity for each read', async () => {

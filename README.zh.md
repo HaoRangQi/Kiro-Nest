@@ -1,321 +1,291 @@
-# dsh-kiro
-
-<p align="center">
-  <img src="assets/kiro-icon.svg" alt="Kiro" width="96" height="96">
-</p>
+# Kiro-nest
 
 [English](README.md) | 中文
 
-面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Kiro provider，支持多种 Kiro 登录、token/profile 自动刷新、实时发现账号模型、Claude/开放权重模型流式调用、工具调用与 reasoning effort。
+把 Kiro 账号变成 OpenAI / Anthropic 兼容接口的独立 HTTP 网关。自带配置页面，支持多账号登录、实时模型发现、用量查询、推理强度、图片、工具调用与流式响应，可用 Docker 或 Node 直接部署。
 
-插件安装后会自动注册 `kiro` provider 并挂载 bundle，不需要 API key，也不需要手工添加 `cordis.yml` 条目。
+![Kiro-nest 配置页面：账号、用量、模型与服务设置](assets/gateway-page.png)
 
-这是一个独立集成项目，与 AWS 或 Kiro 没有关联，也未获其赞助或认可。Kiro 及其徽标是 Amazon 的商标；详见 [NOTICE.md](NOTICE.md)。
+*首次启动时的配置页面（尚未添加账号）。*
 
-## 安装
-
-```sh
-dsh plugin --profile web add github:dat-lequoc/dsh-kiro
-dsh --profile web
-```
-
-使用 DeepSeek Harness 源码 checkout 时：
-
-```sh
-cd ~/deepseek-harness
-pnpm dsh plugin --profile web add github:dat-lequoc/dsh-kiro
-pnpm dsh --profile web
-```
-
-仓库已提交构建后的 `lib/`，所以从 GitHub 安装时不需要执行依赖构建脚本。
-
-<p align="center">
-  <img src="assets/settings-kiro.png" alt="Settings → Kiro：账号状态、credits 使用量与实时模型选择器" width="820">
-</p>
+本项目源自 `dsh-kiro` 的 Kiro 协议核心，现在只保留独立网关形态，不再提供 DeepSeek Harness 插件。与 AWS 或 Kiro 没有关联，也未获其赞助或认可；Kiro 及其徽标是 Amazon 的商标，详见 [NOTICE.md](NOTICE.md)。
 
 ## 功能
 
-- 在 **Settings → Kiro** 中使用 AWS Builder ID、IAM Identity Center、Google 或 GitHub 登录。
-- 导入 Kiro refresh token、API key 或兼容 CLIProxyAPI 的 Microsoft external-IdP 凭据。
-- 导入会报告实际验证到的内容：API key 先与线上模型目录校验，因此页面可以显示`凭据已验证 · 19 个模型可用`；refresh token 因为换取到了真实 access token 而同样报告已验证；external-IdP JSON 只在本地做格式转换，因此显示`凭据已保存`，不会声称做过并不存在的校验。成功后对话框自动关闭，页面上粘贴的密钥被清除，并按当前生效的账号重新读取使用量卡片。
-- 可同时保存多个登录（Builder ID、IAM Identity Center、Google、GitHub、导入的 token、API key 与 external-IdP 凭据可任意组合），并在 **Settings → Kiro** 中选择当前账号。
-- 使用随包提供的 `kiro-login` 命令从终端完成同类登录。
-- 自动发现并保存账号的 CodeWhisperer profile ARN，使刷新后的 token 仍使用正确 profile。
-- 没有插件自管登录时，自动回退到 Kiro IDE/CLI 的 `~/.aws/sso/cache` 凭据。
-- 调用 Kiro `ListAvailableModels`，让模型选择器反映当前账号实际可用的 Opus、Sonnet、Haiku 与开放权重模型。
-- 显示账号套餐、credits 使用量和重置日期，并提供紧凑、可持久化的模型启用列表。
-- 输入框旁显示额度：取剩余最少的一项，低于 20% 变琥珀色、低于 5% 变红色；悬停查看完整明细（套餐、已用/上限、重置时间、读取时间），点击可强制刷新。仅当本会话选中的模型走 Kiro 时显示，且此时才读取额度。
-- 自动发现每个模型的 reasoning effort，包括 Kiro 提供的 `none`、`xhigh` 与 `max`。
-- 解码 Kiro Amazon EventStream 中的文本、推理与工具调用。
-- 向目录声明接受图片的所有模型发送图片，从而启用图片附件与 harness 自带的读图工具。
-- 支持直连或带认证的 HTTP/HTTPS `CONNECT` 代理。
-- `llm-kiro` 设置无需重启即可热更新。
+- **双协议端点**：OpenAI Chat Completions 与 Anthropic Messages，均支持流式和非流式。
+- **多账号**：Builder ID、IAM Identity Center、Google、GitHub 设备码登录，以及 refresh token、Kiro API key、Microsoft external-IdP 凭据导入。
+- **账号管理**：页面添加、切换、移除账号；请求使用当前激活账号。
+- **模型发现**：登录后自动拉取账号实时模型目录，也可在页面手动刷新；支持启用/禁用模型。
+- **用量查询**：展示套餐、credits 使用量、剩余比例与重置时间。
+- **推理控制**：`reasoning_effort` / Anthropic `thinking` 映射到 Kiro 原生 effort 字段。
+- **图片与工具**：base64 图片输入、OpenAI tools 与 Anthropic tool_use/tool_result。
+- **出站代理**：HTTP/HTTPS `CONNECT` 代理，支持带认证的代理 URL。
+- **页面配置**：端口、监听地址、API/管理密钥、代理、区域、profile ARN、默认模型、上下文上限等。
+- **部署简单**：单个 Node 进程；Docker 镜像不依赖 `node_modules`。
 
-## 登录
+## 快速开始
 
-### Web
-
-打开 **Settings → Kiro** 并选择登录方式：Builder ID 使用标准设备授权；IAM Identity Center 还需填写 `https://<company>.awsapps.com/start` 与 region；Google/GitHub 使用 Kiro 的社交设备流程，页面会显示一次性 `XXXX-XXXX` 验证码与 `app.kiro.dev/account/device` 授权网址，插件会等待浏览器授权完成；也可直接导入 refresh token、Kiro API key 或 Microsoft external-IdP JSON。
-
-OAuth 登录完成后，插件会调用 `ListAvailableProfiles`，把选中的 profile ARN 与自管凭据一起保存，并按 ARN 中的 region 发起推理请求。
-
-### 终端
-
-通过已安装的 profile 运行：
+### Docker
 
 ```sh
-dsh plugin --profile web exec kiro-login
+docker compose up -d --build
 ```
 
-常用选项：
+打开 <http://localhost:8787/>，在页面中登录 Kiro 账号。
 
-```sh
-kiro-login --region eu-central-1
-kiro-login --method idc --start-url https://company.awsapps.com/start --region eu-central-1
-kiro-login --method github
-KIRO_REFRESH_TOKEN='…' kiro-login --method refresh-token
-KIRO_API_KEY='…' kiro-login --method api-key
-kiro-login --method external-idp --credentials-file ./kiro-auth.json
-kiro-login --proxy http://user:pass@proxy.example:8080
-kiro-login --no-open
-kiro-login --logout
-```
-
-执行 `kiro-login --help` 可查看全部选项。CLI 支持 `KIRO_REGION`、`KIRO_PROXY_URL`、`KIRO_START_URL`、`KIRO_REFRESH_TOKEN` 与 `KIRO_API_KEY`；敏感值建议放环境变量或受保护的凭据文件，不要直接放命令行参数。
-
-## 凭据
-
-内置登录只写入 `$DSH_HOME/storages/kiro-auth`（通常为 `~/.dsh/storages/kiro-auth`），token 与设备注册文件权限为 `0600`。**退出**只删除这些由插件管理的文件。
-
-自管设备流程凭据（Builder ID、Google、GitHub 与 IDC）通过对应 region 的 AWS OIDC 刷新；单独导入的 refresh token 通过 Kiro desktop auth 服务刷新；Microsoft external-IdP 只允许向受信任的 Microsoft 登录域提交 refresh token。轮换后的自管 refresh token 与发现到的 profile ARN 会原子写回。API key 作为长期凭据使用，并发送 Kiro 要求的 `TokenType: API_KEY`。
-
-若自管凭据不存在，适配器会读取 Kiro IDE/CLI 的 `~/.aws/sso/cache/kiro-auth-token.json` 及其引用的 client-registration 文件，不会删除或覆盖 Kiro 自己的凭据；Kiro 自有凭据刷新后只保存在内存中。
-
-凭据优先级：
-
-1. dsh-kiro 自管凭据
-2. Kiro IDE/CLI SSO 缓存
-
-### 多账号
-
-插件会保存你添加的每一个登录，请求使用其中的**当前账号**。账号保存在 `$DSH_HOME/storages/kiro-auth/accounts.json`：单个原子写入、仅本人可读的文档，包含全部凭据与当前选择。
-
-- **添加账号**会保存新凭据并切换为当前账号，与以往登录的语义一致；新增不会覆盖已有账号，若要重新认证某一行请用 **重新登录**，此时不会改变当前选择。
-- 每行显示名称、认证方式、region 与凭据状态（*可用*、*下次使用时刷新*、*需要登录*），并提供 **使用**（切换为当前账号）、**重新登录**（只重新认证该账号）与 **移除**。
-- 移除当前账号时，若还有其他账号，选择会自动交给另一个已保存账号。**退出所有账号**会删除全部账号及其设备注册；Kiro IDE/CLI 回退不受影响，在没有自管账号时仍然生效。
-- 该选择对整个凭据存储生效、跨会话保持。已开始的请求继续使用它开始时捕获的账号；刷新 token 不会覆盖刷新期间完成的登录。
-- `kiro-auth-token.json` 会与当前账号保持同步，因此 CLI 与旧版本工具读取到的始终是实际在用的凭据。
-
-只保留旧的单凭据文件的安装会被当作一个导入账号读取；首次写入多账号文档时，该文件保持原样不动。
-
-## 模型发现与推理档位
-
-适配器按认证类型选择 Amazon Q 或 CodeWhisperer 接口查询当前账号模型，并缓存五分钟。**Settings → Kiro → 发现模型**会强制刷新。紧凑模型选择器决定哪些路由显示在 DSH 中；选择保存在 `$DSH_HOME/storages/kiro-auth/model-settings.json`，新发现的模型会自动启用。已选模型优先显示，每个系列内按最新版本排序。发现接口暂时失败时仍使用配置的后备目录；未列出的模型 id 也会继续透传给 Kiro，因此取消勾选不会中断已有会话。
-
-账号卡片还会显示 Kiro credits 使用量、套餐和重置日期。使用量缓存五分钟，打开设置页时刷新，也可通过 **刷新使用量** 强制更新。配额接口失败不会影响聊天，也不会清除上次成功结果。
-
-每个模型会从实时 `additionalModelRequestFieldsSchema` 公布自己的 effort 枚举与默认值，具体选项因模型而异；Kiro 当前 schema 包含：
-
-| 档位 | 行为 |
-|---|---|
-| `none` | 在原生 schema 支持时关闭推理。 |
-| `low` | 请求较短推理预算。 |
-| `medium` | 请求均衡推理预算。 |
-| `high` | 请求较高推理预算。 |
-| `xhigh` | 在模型提供时请求扩展高档。 |
-| `max` | 在模型提供时请求最高档。 |
-
-DSH 模型菜单只显示当前模型实际提供的选项，并采用 Kiro 给出的模型默认值。适配器通过 Kiro 原生的 `output_config.effort` 或 `reasoning.effort` 字段发送选择；旧的手工后备模型仍兼容 `off`/`low`/`medium`/`high` 提示词标记。可在 DSH 中选择其他档位，或设置可选的部署级覆盖：
+账号、配置与模型选择保存在 `kiro-nest-data` 卷的 `/data` 下。首次部署建议在 `docker-compose.yml` 或环境变量中设置访问密钥：
 
 ```yaml
-llm-kiro:
-  reasoningEffort: medium
+environment:
+  KIRO_NEST_API_KEY: "change-me"
+  KIRO_NEST_ADMIN_TOKEN: "change-me-too"
 ```
 
-## 配置
-
-机器级配置写入 `$DSH_HOME/settings.yaml`（通常为 `~/.dsh/settings.yaml`）：
-
-```yaml
-llm-kiro:
-  proxyUrl: http://proxy.example:1082
-  reasoningEffort: medium
-```
-
-所有字段均可选：
-
-| 字段 | 默认值 | 含义 |
-|---|---|---|
-| `proxyUrl` | 直连 | Kiro 与 OIDC 请求使用的 HTTP/HTTPS 代理，可在 URL 中包含凭据。 |
-| `region` | 已登录 token 的 region | 选择 `q.<region>.amazonaws.com`。 |
-| `profileArn` | 账号默认值 | 请求与模型发现使用的 CodeWhisperer profile。 |
-| `thinking` | `enabled` | `disabled` 会隐藏推理控制并停止发送原生 effort 字段。 |
-| `reasoningEffort` | 模型实时默认值 | 可选覆盖：`none`、`off`、`low`、`medium`、`high`、`xhigh` 或 `max`；模型不支持时会拒绝该值。 |
-| `defaultContextWindow` | `200000` | 发现接口未返回准确上限时的后备容量。 |
-| `maxContextWindow` | 未设置 | 任何模型上报容量的上限；Harness 会在对话接近该数值时压缩。可在 **设置 → Kiro → 最大上下文** 中设置。见[Token 预算](#token-预算)。 |
-| `models` | 内置后备目录 | 实时发现不可用时使用的建议目录。 |
-| `streamIdleTimeoutMs` | `300000` | provider 单次读取允许的最大空闲时间。 |
-| `tokenExpiryBufferMs` | `300000` | 提前多久刷新 access token。 |
-| `retryPolicy` | 有界常规策略 | 由 `dsh-llm-retry` 执行的 provider 重试策略。 |
-
-若需要把配置固定到单个 profile，可在 `$DSH_HOME/profiles/<名称>/cordis.patch.yml` 按 id 覆盖：
-
-```yaml
-- id: llm-kiro
-  config:
-    proxyUrl: http://proxy.example:1082
-```
-
-不要再套一层 `insert:`，bundle 已经插入 `llm-kiro`。
-
-## 请求与响应
-
-Kiro 没有独立 system 槽位，因此 harness system prompt 会放入最早的 user 轮次。历史会标准化为 Kiro 要求的 user/assistant 严格交替；工具 schema 随当前轮次发送；找不到对应调用的工具结果会降为文本，避免压缩后形成无效引用。
-
-### 本插件不做的事
-
-它永不执行压缩。作为适配器，它只负责上游协议这一层：会话应该包含什么由 `dsh-compaction-basic` 决定，依据 token meter 与本插件上报的溢出错误码。因此序列化只修复协议形状——合并同角色连续轮次、填补交替空缺、把孤立工具结果降为文本——但绝不为了让请求「装得下」而丢弃或压缩内容。超出模型窗口的会话会被完整发送，由上游拒绝，而这次拒绝正是 harness 启动恢复的信号。在本地裁剪会丢掉 harness 仍认为存在的轮次，也会掩盖触发压缩的溢出。
-
-唯一的例外是刻意且狭窄的：如果某个文本块的全部内容正是本插件早期自己发出的 `[system: conversation continues]` 填充语，重建历史时会将其丢弃，因为重放它会让模型学着复现该短语。该约束由「plugin boundary: the adapter never compacts」测试固定。
-
-响应为 `vnd.amazon.eventstream` 帧。适配器验证帧边界与 CRC，将原生 `reasoningContentEvent` 帧与旧式 `<thinking>` 内容转为 DSH reasoning block，保留文本、解码工具调用，并过滤已知的开放权重提示词格式残留。
-
-终端 `metadataEvent` 提供结束原因：`END_TURN`、`TOOL_USE`、`MAX_TOKENS`、`MODEL_CONTEXT_WINDOW_EXCEEDED`、`CONTENT_FILTERED`、`PAUSE_TURN` 分别映射到对应的 DSH 结果；无法识别的原因会以可诊断的错误码结束该轮，而不是伪装成成功。
-
-### 生成参数
-
-`generateAssistantResponse` 只声明了 `conversationState`、`profileArn`、agent-mode 请求头、`additionalModelRequestFields` 与 `systemPrompt`，并没有 `inferenceConfig`：顶层生成参数对象会被服务接受但直接忽略，因此本适配器不再发送它。
-
-`additionalModelRequestFields` 会按每个模型通过 `ListAvailableModels` 公布的 schema 校验，而该 schema 是 `additionalProperties: false`。因此适配器只发送当前模型明确公布的字段：
-
-- 推理档位写入模型声明的 `output_config.effort` 或 `reasoning.effort`。
-- 请求中的 `maxTokens` 写入 `max_tokens`，并夹到模型公布的 `minimum`/`maximum` 之间（较新的 Claude 路由目前是 1024–128000）。
-- 完全不公布 schema 的模型不会收到 `additionalModelRequestFields`，因为该成员本身会被拒绝。
-
-其余参数没有可用位置。`temperature`、`topP` 与 stop 序列不属于该操作的契约（发送未公布的属性会直接被拒绝），因此这些选项会被忽略而不是发送。
-
-### 图片
-
-只要模型的目录条目声明了 `supportedInputTypes: ["TEXT","IMAGE"]`，即可发送图片——在实测账号上为 19 个模型中的 17 个，包含全部 Claude 路由；`glm-5` 与 `minimax-m2.5` 只报告文本。该能力从目录读取而非按模型 id 猜测，因此路由获得或失去该能力都无需改代码；`models[].inputModalities` 可在某个套餐不一致时覆盖，而完全没有声明的模型保持纯文本——未声明的能力不应被假定。
-
-Kiro 接受 png、jpeg、gif 与 webp。图片会在 base64 展开前重新编码到最多 8000x8000 像素、3.75 MB，与其模型所在服务的上限一致，并以 `userInputMessage.images` 发送，即 `ImageBlock { format, source: { bytes } }`。
-
-在该协议中只有 user 轮次有图片位置。服务的 `AssistantResponseMessage` 没有该字段，因此历史中 assistant 侧的图片会被拒绝而不是被丢弃；`ToolResultContentBlock` 只是 text 与 json 的联合，因此工具返回的图片会被提升到携带该工具结果的 user 轮次上——这是能保留它的最近位置。图片字节存放在 harness 的 attachment 服务中，因此未挂载该服务、或版本早于其 request-image 编码器的 profile，会直接报告不支持图片，而不是在请求中途失败。
-
-### Token 统计
-
-存在两种信号，适配器优先使用精确的那一种。
-
-当 `metadataEvent` 携带 `tokenUsage` 时，其计数直接映射为 DSH 原生 token usage：未缓存输入、输出、缓存读取与缓存写入，不估算、不重复计数。`totalTokens` 仅用于在某些路由只上报总数而缺少未缓存输入时反推该项。
-
-Kiro 并非在所有路由上都发送 `tokenUsage`——本账号的所有实测请求都没有收到。但它在每次请求都会发送 `contextUsageEvent`，而 wire schema 也把 `contextUsagePercentage` 视为 token 统计的一部分；因此在没有精确计数时，适配器会用该百分比乘以模型公布的上下文窗口来定价。这不只影响展示：DSH 的 token meter 需要以上游用量为锚点，缺失时只能整段用本地启发式估算，压缩阈值会随之漂移。两个参考实现都以相同方式、出于相同原因转换该百分比。
-
-需要明确的是：输入侧是上游自己给出的「窗口占用」测量值，精度取决于上游上报的精度，并非单次请求的精确计数；输出侧完全没有上游信号，由本次流式输出的字符数换算。缓存分项绝不会凭空生成，只有 Kiro 上报时才会出现。
-
-缓存分项只在 Kiro 上报时才出现，而实测中没有任何路由会上报——因此 DSH 显示 `Cache hit 0%`，其含义是「未上报」而不是「没有命中缓存」。缓存确实在发生：同一长前缀的重复请求消耗 0.0417 credits，而首次为 0.0787，降低 47%。Kiro 在服务端按前缀做缓存，因此多轮循环中重发历史本身就能受益；它只是不发送 `cacheReadInputTokens`，而适配器不会凭空造出该值。
-
-服务模型在 `UserInputMessage`、`AssistantResponseMessage` 以及 `Tool` 联合类型中都声明了 `cachePoint: {type: 'default'}`；实测发送会被接受，但没有任何影响：带与不带的冷/热请求 credits 消耗在 17 位有效数字上完全一致。该实验保留在 `tests/live-cache.spec.ts`，以便随时复测而非靠推断。
-
-设置页中的账号 credits 使用量属于套餐层面的独立数据，绝不会换算为单次请求的 token 数。
-
-## Token 预算
-
-Kiro 的实时目录为 Claude 模型上报 1,000,000 token 的窗口，而 Harness 会在对话接近它所知的容量时进行压缩。按默认阈值，历史可以增长到约 800,000 token 才被摘要，且每一轮都要重发。
-
-`maxContextWindow` 限制本适配器上报的容量：
-
-```yaml
-- id: llm-kiro
-  config:
-    maxContextWindow: 300000
-```
-
-它只会下调模型声称的容量，绝不会上调，因此只会让 Harness 更早压缩。该值同时作用于**设置 → Kiro** 显示的模型列表与路由事实。
-
-可以手写在插件自己的 profile 行上：
-
-```yaml
-- id: llm-kiro
-  config:
-    maxContextWindow: 300000
-```
-
-也可以在 **设置 → Kiro → 最大上下文** 中设置：该输入框通过 Harness 的配置编辑器写入同一行，因此会持久化到 `cordis.patch.yml` 并热重载，无需重启。留空即移除该覆盖，各模型恢复各自声明的容量。**设置 → 模型** 的提供方编辑器无法设置它：该编辑器是按适配器家族手写的表单，没有对应布局的适配器只会显示指向 `cordis.patch.yml` 的提示。
-
-### 上限实际触发什么
-
-Harness 在 `min(W × thresholdRatio, W − O − headroom)` 处触发压缩，其中 `W` 为上报容量，`O` 为所选模型的输出预留（Kiro 的 Claude 模型为 `maxTokens` 128,000），`headroom` 默认为 65,536。对 Kiro 而言，只要窗口低于约 967,000，起决定作用的就是第二项：
-
-| `maxContextWindow` | 压缩触发点 | 保留的原文尾部 |
-| --- | --- | --- |
-| *未设置* — 1,000,000 | 约 800,000 | 约 140,000 |
-| 400,000 | 约 206,000 | 约 44,000 |
-| 300,000 | 约 106,000 | 约 28,000 |
-| 250,000 | 约 56,000 | 约 20,000 |
-| 220,000 | 约 26,000 | 约 15,000 |
-| 205,000 及以下 | **被拒绝** — 见下 | — |
-
-低于约 205,000 时，默认 headroom 不再留下可用的消息预算，Harness 会拒绝对该目标做主动压缩（溢出恢复仍然有效）并给出指名警告。要继续下调，请改 Harness 自身的设置——这部分属于 `compaction-basic`，不属于本插件：
-
-```yaml
-- id: compaction-basic
-  config:
-    headroomTokens: 32768   # 下限降至约 165,000；同时限制摘要输出上限
-    thresholdRatio: 0.5     # 仅在 W 很大时起作用
-```
-
-配合 `headroomTokens: 32768` 时，上限 200,000 会在约 39,000 处压缩，上限 250,000 则在约 89,000 处压缩。当 `W − O − headroom` 更小时，`thresholdRatio` 不起作用。
-
-也支持逐模型覆盖，但它匹配精确的 `provider`/`model` 组合，因此针对 Kiro 的策略必须逐一声明模型：
-
-```yaml
-- id: compaction-basic
-  config:
-    modelPolicies:
-      - { provider: kiro, model: claude-opus-5.5, thresholdRatio: 0.5 }
-      - { provider: kiro, model: claude-sonnet-5.5, thresholdRatio: 0.5 }
-```
-
-## 为什么部分 Claude 路由需要代理
-
-Kiro 可能同时按账号权益与请求出口授权模型系列。未授权出口下，`claude-*` 可能返回 `INVALID_MODEL`，而开放权重模型仍可工作。需要时可用 `proxyUrl` 提供合适出口。代理使用 HTTP `CONNECT`，TLS 在隧道内协商，因此代理能看到目标主机名，但看不到 bearer token 或请求正文。
-
-## 错误
-
-适配器会把上游失败映射为稳定的 DSH 错误码：`AUTH`、`FORBIDDEN`、`RATE_LIMIT`、`INVALID_MODEL`、`INVALID_REQUEST`、`SERVER`、`TRANSPORT`、`ABORTED`、`TIMEOUT`、`STREAM_CLOSED`、`MALFORMED_RESPONSE`、`EMPTY_RESPONSE`。
-
-套餐额度用尽会映射为 `QUOTA`：Kiro 可能以 HTTP 402 上报，有时也用 403 或原因为月度/每日额度的限流（`MONTHLY_REQUEST_COUNT`、`CREDIT_CONSUMPTION_RATE_EXCEEDED`）。重试无法解决，因此不能显示为速率限制或权限问题。
-
-当 Kiro 因内容超限拒绝请求时，会映射为 `CONTEXT_WINDOW_EXCEEDED`——依据其 `CONTENT_LENGTH_EXCEEDS_THRESHOLD` 校验原因以及官方客户端同样识别的 `Input is too long.` / `Prompt is too long.` 文案。只有这个错误码会触发 DSH 的紧急压缩并重试该轮；其他 HTTP 400 仍是 `INVALID_REQUEST`，因为压缩无法修复格式错误的请求。
-
-## 开发
+### 直接运行
 
 ```sh
 npm install
-npm run check
-npm run pack:dist
+npm run build
+KIRO_NEST_DATA_DIR=./data npm run gateway:start
 ```
 
-`npm run check` 会执行类型检查、keyless Vitest 测试、重建提交产物，并检查 Web client 与登录 CLI 语法。
-
-`tests/live-*.spec.ts` 中的三个探针会访问已登录的 Kiro 账号，未设置 `KIRO_LIVE=1` 时自动跳过。它们分别记录真实请求返回的流帧、验证超长请求的分类结果，并跑通两轮工具调用循环，用于对照真实账号（而非固定 fixture）核验协议契约：
+开发时可以直接运行 TypeScript 源码（Node 24 原生类型剥离）：
 
 ```sh
-KIRO_LIVE=1 KIRO_MODEL=claude-opus-5 KIRO_EFFORT=high npx vitest run tests/live-frames.spec.ts
+npm run gateway
+# 或监听改动自动重启
+npm run gateway:dev
 ```
 
-`tests/session-replay.spec.ts`（`DSH_SESSIONS=1`）会把本地 DSH 会话存档重放给序列化器；`verification/` 目录提供一个不消耗额度的验证装置，用于证明本适配器上报的上下文溢出会触发 DSH 压缩并重试该轮。
+### 打开页面
+
+默认地址为 <http://localhost:8787/>。页面提供账号、用量、模型、服务设置与接入信息。
+
+## 配置
+
+配置按请求读取，修改代理、区域、默认模型等立即生效；端口与监听地址的修改需要重启监听，页面会提示并提供“重启监听”按钮。
+
+### 环境变量
+
+环境变量优先于配置文件；容器部署建议用环境变量。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `KIRO_NEST_PORT` / `PORT` | `8787` | HTTP 监听端口 |
+| `KIRO_NEST_HOST` | `0.0.0.0` | 监听地址；仅本机使用可设为 `127.0.0.1` |
+| `KIRO_NEST_DATA_DIR` / `DATA_DIR` | `./data` | 数据目录 |
+| `KIRO_NEST_API_KEY` | 空 | 模型 API 密钥；空表示不鉴权 |
+| `KIRO_NEST_ADMIN_TOKEN` | 空 | 页面与 `/api/*` 的管理令牌；空表示不鉴权 |
+| `KIRO_NEST_PROXY_URL` / `KIRO_PROXY_URL` | 空 | 出站 HTTP/HTTPS 代理 |
+| `KIRO_NEST_REGION` / `KIRO_REGION` | 跟随账号 | 强制 AWS 区域 |
+| `KIRO_NEST_PROFILE_ARN` | 跟随账号 | 强制 CodeWhisperer profile |
+| `KIRO_NEST_DEFAULT_MODEL` | 空 | 请求未指定模型时使用；空则取目录第一个 |
+| `KIRO_NEST_REASONING_EFFORT` | 跟随模型 | 覆盖所有模型的推理强度 |
+| `KIRO_NEST_THINKING` | `enabled` | `enabled` 或 `disabled` |
+| `KIRO_NEST_MAX_CONTEXT_WINDOW` | 未设置 | 全局上下文上限 |
+| `KIRO_NEST_DEFAULT_CONTEXT_WINDOW` | `200000` | 模型未提供精确容量时的后备值 |
+| `KIRO_NEST_STREAM_IDLE_TIMEOUT_MS` | `300000` | 单次流式读取的最大空闲时间 |
+| `KIRO_NEST_TOKEN_EXPIRY_BUFFER_MS` | `300000` | 提前刷新 access token 的时间窗口 |
+
+### 页面字段
+
+页面可以修改上述大部分设置，并额外显示数据目录与密钥是否已配置。密钥输入框留空表示保持不变，勾选“清除”才会删除。
+
+### 端口与容器
+
+- 页面修改端口只改变进程监听地址，不会改变 Docker 端口映射。
+- 容器部署时优先通过 `KIRO_NEST_PORT` 与环境变量调整端口，并同步修改 `docker-compose.yml` 的 `ports`。
+- 默认使用命名卷 `kiro-nest-data`；若改为宿主机目录挂载（例如 `./data:/data`），请确保目录对容器内 uid `1000` 可写。
+
+## 客户端接入
+
+### OpenAI
+
+Base URL：`http://localhost:8787/v1`
+
+```sh
+curl http://localhost:8787/v1/models
+
+curl http://localhost:8787/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer <KIRO_NEST_API_KEY>' \
+  -d '{
+    "model": "claude-sonnet-5",
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true
+  }'
+```
+
+支持字段：
+
+- `model`、`messages`、`stream`、`stream_options.include_usage`
+- `max_tokens` / `max_completion_tokens`
+- `reasoning_effort`
+- `tools` / `tool_choice`（工具声明与工具结果）
+- `stop`、`user`（`user` 作为稳定会话标识）
+- 图片：`content` 数组中的 `image_url` 或 `input_image`，仅接受 base64 `data:` URL
+
+### Anthropic
+
+Base URL：`http://localhost:8787/anthropic`
+
+```sh
+curl http://localhost:8787/anthropic/v1/messages \
+  -H 'content-type: application/json' \
+  -H 'x-api-key: <KIRO_NEST_API_KEY>' \
+  -d '{
+    "model": "claude-sonnet-5",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "你好"}],
+    "stream": true
+  }'
+```
+
+同时接受根路径 `POST /v1/messages`，方便 Claude Code 直接把 `ANTHROPIC_BASE_URL` 指向网关根地址：
+
+```sh
+export ANTHROPIC_BASE_URL=http://localhost:8787
+export ANTHROPIC_AUTH_TOKEN=<KIRO_NEST_API_KEY>
+```
+
+### 鉴权
+
+- 设置了 `KIRO_NEST_API_KEY` 时，模型端点需要 `Authorization: Bearer <key>` 或 `x-api-key: <key>`。
+- 设置了 `KIRO_NEST_ADMIN_TOKEN` 时，`/api/*` 需要 `Authorization: Bearer <token>`、`x-admin-token: <token>` 或 `?token=<token>`。
+- 两个密钥相互独立：模型密钥不能访问管理 API。
+
+## 账号与登录
+
+在页面点击“添加账号”，选择登录方式：
+
+- **AWS Builder ID / IAM Identity Center**：标准设备码授权；IDC 需要填写 Start URL。
+- **Google / GitHub**：Kiro 的社交设备流程，页面显示验证地址与一次性用户码。
+- **刷新令牌**：导入已有 Kiro refresh token，可指定区域、client id/secret、profile ARN。
+- **Kiro API Key**：导入后立即与账号模型目录校验。
+- **Microsoft External IdP**：导入兼容 CLIProxyAPI 的凭据 JSON。
+
+登录完成后，网关会：
+
+1. 保存凭据并设为当前账号；
+2. 尝试发现 profile ARN；
+3. 在后台刷新该账号的模型目录。
+
+凭据存放在 `<dataDir>/storages/kiro-auth`，文件权限 `0600`，目录权限 `0700`。若没有网关管理的账号，会回退读取本机 Kiro IDE/CLI 的 `~/.aws/sso/cache/kiro-auth-token.json`。
+
+### 从旧版 dsh-kiro 迁移
+
+网关沿用与 `dsh-kiro` 相同的目录结构。把旧的 `~/.dsh/storages/kiro-auth` 复制到 `<dataDir>/storages/kiro-auth`，页面会把它识别为网关管理的账号。
+
+## 模型
+
+未登录或模型发现失败时，使用内置占位目录，只保留两个主力模型：
+
+- `claude-sonnet-5`
+- `claude-opus-5`
+
+登录后页面会显示该账号实际可用的完整模型目录，并自动启用新发现的模型。页面可调整启用列表；保存后，`/v1/models` 与模型选择器只展示启用的模型。
+
+每个模型的实时目录会携带上下文容量、输出上限、支持的输入模态、reasoning effort 枚举与默认值。页面“上下文上限”会对所有模型取较小值，用于限制上报容量。
+
+推理强度通过 OpenAI `reasoning_effort` 或 Anthropic `thinking.budget_tokens` 映射：
+
+- Anthropic `thinking: { type: "disabled" }` → `off`
+- 预算 ≤ 4000 → `low`
+- 预算 ≤ 12000 → `medium`
+- 更大预算 → `high`
+- OpenAI `reasoning_effort` 直接使用对应档位
+
+## 用量
+
+页面展示 Kiro 套餐、credits 使用量、剩余比例和重置日期。用量缓存五分钟，可点击“刷新用量”强制更新。额度接口失败不会影响聊天，也不会清除上次成功结果。
+
+## 协议行为
+
+### system prompt
+
+Kiro 的 `generateAssistantResponse` 没有独立 system 槽位，system 内容会被合并到最早的 user 轮次。OpenAI 的 `system`/`developer` 消息与 Anthropic 的 `system` 字段都会进入这个位置。
+
+### 工具调用
+
+- OpenAI：`tools[].function` 转换为 Kiro 工具 schema；assistant `tool_calls` 与 `tool` 消息转换为 Kiro 的工具调用/结果。
+- Anthropic：`tools[].input_schema`、`tool_use`、`tool_result` 直接映射；同一 user 消息中的工具结果会先作为 tool 轮次发送。
+- 工具名必须匹配 `^[A-Za-z][A-Za-z0-9_]{0,63}$`。
+
+### 图片
+
+网关只接受 base64 `data:` URL：
+
+- OpenAI：`image_url.url` / `input_image.image_url`
+- Anthropic：`{ "type": "image", "source": { "type": "base64", "media_type": "...", "data": "..." } }`
+
+支持 png、jpeg、gif、webp。网关不会主动抓取远程图片 URL，避免 SSRF；远程 URL 会返回 400。Kiro 只在 user 轮次接受图片，assistant 历史中的图片会被拒绝。
+
+### 流式
+
+- OpenAI：`data: {...}` 帧，结束发送 `data: [DONE]`；开启 `stream_options.include_usage` 时额外发送 usage 帧。
+- Anthropic：完整的 `message_start` → `content_block_start` → `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop` 事件序列。
+- 推理内容在 OpenAI 中以 `reasoning_content` 返回，在 Anthropic 中以 `thinking` 块返回。
+
+### 忽略的参数
+
+Kiro 的 `generateAssistantResponse` 不提供采样参数位置，以下字段会被忽略：`temperature`、`top_p`、`top_k`。`stop` 虽然会被网关解析，但上游协议没有对应字段，实际不会生效。
+
+## 错误
+
+| 情况 | HTTP 状态 |
+| --- | --- |
+| 请求格式错误、未知角色、上下文超限 | 400 |
+| 模型 API 未授权 | 401 |
+| 套餐额度耗尽 | 402 |
+| 模型不存在 | 404 |
+| 请求体过大 | 413 |
+| 速率限制 | 429 |
+| 上游凭据/服务错误 | 502 |
+| 上游超时 | 504 |
+| 客户端中断 | 499 |
+
+错误体按客户端协议返回：OpenAI 为 `{ "error": { ... } }`，Anthropic 为 `{ "type": "error", "error": { ... } }`。
+
+## 安全
+
+- 凭据文件 `0600`，数据目录 `0700`；页面只报告密钥是否已配置，不返回密钥原文。
+- 公网部署必须设置 `KIRO_NEST_API_KEY` 与 `KIRO_NEST_ADMIN_TOKEN`，并建议置于 HTTPS 反向代理之后。
+- 图片只接受 base64 data URL，网关不代客户端访问远程 URL。
+- 管理令牌与模型密钥相互独立。
+- 日志与错误信息会脱敏 bearer token 与 refresh token。
+
+## 开发与测试
+
+```sh
+npm install
+npm run gateway:dev   # 源码直跑并 watch
+npm test              # Vitest
+npm run check         # 类型检查 + 测试 + 构建 + 产物语法检查
+npm run build         # tsc + tsdown，输出 lib/gateway/main.js
+npm run pack:dist     # 生成 npm 包
+```
+
+测试覆盖：
+
+- 配置合并、鉴权与静态文件路由
+- OpenAI / Anthropic 请求转换与 SSE 编码
+- HTTP 端到端流式/非流式补全
+- 账号存储、登录、凭据解析、模型发现、用量解析、EventStream 解码
+
+当前测试不访问真实 Kiro 账号。
 
 ## 已知限制
 
-- 图片输入目前以 `UNSUPPORTED_CONTENT` 拒绝。
-- `temperature`、`topP` 与 stop 序列在 Kiro 的 `generateAssistantResponse` 请求中没有可用位置，会被忽略。
-- 工具名必须匹配 `^[A-Za-z][A-Za-z0-9_]{0,63}$`。
+- Anthropic thinking 块不发送 `signature_delta`；严格校验扩展思考签名的客户端可能需要额外适配。
+- `temperature`、`top_p`、`top_k` 与 `stop` 不会被上游采用。
+- 图片仅支持 base64 data URL，远程 URL 不会被抓取。
 - 不支持 SOCKS 代理。
+- 未登录时只展示两个占位模型；真实模型以账号目录为准。
+- 容器内通过页面修改端口后，需要同步调整 Docker 端口映射。
 
 ## 致谢
 
-Kiro 传输基础在 MIT 许可下源自 [caopu16/dsh-llm-kiro](https://github.com/caopu16/dsh-llm-kiro)。登录、profile ARN、API key 与 external-IdP 行为参考并核对了 [decolua/9router](https://github.com/decolua/9router) 和 [dat-lequoc/Kiro-Go](https://github.com/dat-lequoc/Kiro-Go)。DSH Web 集成遵循 [LiZhenNet/dsh-antigravity](https://github.com/LiZhenNet/dsh-antigravity) 展示的可安装 bundle 模式。原始版权声明保留在 [LICENSE](LICENSE)。
+Kiro 传输与协议实现源自 [dat-lequoc/dsh-kiro](https://github.com/dat-lequoc/dsh-kiro)，其传输基础在 MIT 许可下来自 [caopu16/dsh-llm-kiro](https://github.com/caopu16/dsh-llm-kiro)。登录、profile ARN、API key 与 external-IdP 行为参考并核对了 [decolua/9router](https://github.com/decolua/9router) 和 [dat-lequoc/Kiro-Go](https://github.com/dat-lequoc/Kiro-Go)。原始版权声明保留在 [LICENSE](LICENSE)。
 
 ## 许可
 

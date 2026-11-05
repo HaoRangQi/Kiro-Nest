@@ -1,0 +1,11 @@
+node_modules
+lib
+dist
+.git
+.gitignore
+.github
+.workflow
+.ccgui
+tests
+data
+*.log

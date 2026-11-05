@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { KiroCatalogModel } from '../src/adapter.ts'
+import type { KiroCatalogModel } from '../src/connection.ts'
 import {
   compareKiroModels,
   FileModelSettingsStore,
@@ -16,7 +16,7 @@ afterEach(async () => {
 })
 
 async function store(): Promise<{ store: FileModelSettingsStore; file: string }> {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-kiro-models-'))
+  const directory = await mkdtemp(join(tmpdir(), 'kiro-nest-models-'))
   temporaryDirectories.push(directory)
   const file = join(directory, 'model-settings.json')
   return { store: new FileModelSettingsStore(file), file }

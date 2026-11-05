@@ -1,8 +1,8 @@
 /** Live Kiro model discovery through ListAvailableModels. */
 
-import { LlmError } from '@deepseek-ai/dsh-llm'
-import type { ModelModality } from '@deepseek-ai/dsh-llm'
-import type { KiroCatalogModel, KiroConnectionOptions } from './adapter.ts'
+import { KiroError } from './errors.ts'
+import type { ModelModality } from './chat.ts'
+import type { KiroCatalogModel, KiroConnectionOptions } from './connection.ts'
 import type { KiroAuthMethod, KiroToken } from './auth.ts'
 import { assertKiroProfileArn } from './profile.ts'
 import { getJson, postJsonWithHeaders } from './transport.ts'
@@ -225,7 +225,7 @@ export function parseMaxTokensBounds(
 }
 
 /**
- * Parse Kiro's ListAvailableModels response into harness catalog entries.
+ * Parse Kiro's ListAvailableModels response into catalog entries.
  * @param body - decoded JSON response.
  * @returns unique models in provider order.
  */
@@ -292,7 +292,7 @@ function parseModelPage(body: unknown): KiroCatalogModel[] {
   return models
 }
 
-function discoveryError(status: number, body: unknown): LlmError {
+function discoveryError(status: number, body: unknown): KiroError {
   const value = record(body)
   const message = typeof value?.message === 'string'
     ? value.message
@@ -302,17 +302,19 @@ function discoveryError(status: number, body: unknown): LlmError {
       : status === 429 ? 'RATE_LIMIT'
         : status >= 500 ? 'SERVER'
           : 'INVALID_REQUEST'
-  return new LlmError(message, code, { status })
+  return new KiroError(message, code, { status })
 }
 
 /** Cached account-specific model discovery used by the adapter and web UI. */
 export class KiroModelDiscovery {
+  private readonly options: KiroModelDiscoveryOptions
   private readonly requestJson: ModelDiscoveryRequest
   private readonly profileRequestJson: ProfileDiscoveryRequest
   private readonly cacheTtlMs: number
   private readonly cache = new Map<string, CacheEntry>()
 
-  constructor(private readonly options: KiroModelDiscoveryOptions) {
+  constructor(options: KiroModelDiscoveryOptions) {
+    this.options = options
     this.requestJson = options.requestJson ?? getJson
     this.profileRequestJson = options.profileRequestJson ?? postJsonWithHeaders
     this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS

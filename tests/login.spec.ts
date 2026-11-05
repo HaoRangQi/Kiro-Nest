@@ -26,7 +26,7 @@ afterEach(async () => {
 })
 
 async function temporary(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-kiro-test-'))
+  const directory = await mkdtemp(join(tmpdir(), 'kiro-nest-test-'))
   temporaryDirectories.push(directory)
   return directory
 }

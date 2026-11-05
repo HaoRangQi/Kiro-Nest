@@ -6,7 +6,7 @@ const PROFILE_ARN = /^arn:(?:aws|aws-us-gov|aws-cn):codewhisperer:([a-z]{2}(?:-[
 export function assertKiroProfileArn(value: string): string {
   const profileArn = value.trim()
   if (!PROFILE_ARN.test(profileArn)) {
-    throw new Error('dsh-kiro: invalid CodeWhisperer profile ARN')
+    throw new Error('kiro-nest: invalid CodeWhisperer profile ARN')
   }
   return profileArn
 }
@@ -15,6 +15,6 @@ export function assertKiroProfileArn(value: string): string {
 export function profileRegion(value: string): string {
   const profileArn = assertKiroProfileArn(value)
   const match = PROFILE_ARN.exec(profileArn)
-  if (match?.[1] === undefined) throw new Error('dsh-kiro: profile ARN contains no region')
+  if (match?.[1] === undefined) throw new Error('kiro-nest: profile ARN contains no region')
   return match[1]
 }

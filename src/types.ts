@@ -4,7 +4,7 @@
  * `vnd.amazon.eventstream` frame sequence whose payloads are the JSON events
  * declared here.
  *
- * @module dsh-kiro/types
+ * @module kiro-nest/types
  */
 
 /** One tool schema as CodeWhisperer accepts it. */

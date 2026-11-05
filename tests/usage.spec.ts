@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { KiroConnectionOptions } from '../src/adapter.ts'
+import type { KiroConnectionOptions } from '../src/connection.ts'
 import { KiroUsageService, parseKiroUsage } from '../src/usage.ts'
 
 const connection = {

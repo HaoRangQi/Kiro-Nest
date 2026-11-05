@@ -1,20 +1,18 @@
 import { defineConfig } from 'tsdown'
 
 /**
- * Bundle the compiled JavaScript the TypeScript build emits.
+ * Bundle the standalone gateway.
  *
- * DSH 0.2.1 removed the runtime invariant registry, so the package no longer
- * publishes an invariant companion entry.
+ * The bundle only uses Node built-ins, which keeps the runtime Docker image
+ * free of node_modules.
  */
-export default defineConfig([
-  {
-    entry: ['lib/types/index.js'],
-    outDir: 'lib',
-    format: ['esm'],
-    platform: 'node',
-    target: 'es2024',
-    fixedExtension: false,
-    dts: false,
-    clean: false,
-  },
-])
+export default defineConfig({
+  entry: ['lib/types/gateway/main.js'],
+  outDir: 'lib/gateway',
+  format: ['esm'],
+  platform: 'node',
+  target: 'es2024',
+  fixedExtension: false,
+  dts: false,
+  clean: false,
+})

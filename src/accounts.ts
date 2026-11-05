@@ -17,11 +17,11 @@
  *   it, and never interprets token material; interpreting stays with the
  *   adapter own credential handling.
  *
- * @module dsh-kiro/accounts
+ * @module kiro-nest/accounts
  */
 
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, readdir, rename, rmdir, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, rename, rmdir, stat, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
@@ -422,8 +422,11 @@ export class KiroAccountStore {
     await this.ownDirectory()
     let part = dirname(this.directory)
     while (true) {
-      const stat = await lstat(part)
-      if (!stat.isDirectory()) fail('Kiro credential path contains a non-directory component', 'UNSAFE_ACCOUNT_STORE')
+      // Follow links on ancestors: macOS puts temp homes under /var, a symlink
+      // to /private/var, and a linked directory is still a directory. The
+      // credential directory itself is checked with lstat in ownDirectory.
+      const info = await stat(part)
+      if (!info.isDirectory()) fail('Kiro credential path contains a non-directory component', 'UNSAFE_ACCOUNT_STORE')
       const next = dirname(part)
       if (next === part) break
       part = next

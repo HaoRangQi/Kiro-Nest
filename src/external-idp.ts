@@ -33,10 +33,10 @@ export function assertMicrosoftTokenEndpoint(value: string): string {
   try {
     url = new URL(value.trim())
   } catch (error: unknown) {
-    throw new Error('dsh-kiro: external IdP token endpoint is not a valid URL', { cause: error })
+    throw new Error('kiro-nest: external IdP token endpoint is not a valid URL', { cause: error })
   }
   if (url.protocol !== 'https:' || !MICROSOFT_TOKEN_HOSTS.has(url.hostname.toLowerCase())) {
-    throw new Error('dsh-kiro: external IdP token endpoint must use an approved Microsoft login host')
+    throw new Error('kiro-nest: external IdP token endpoint must use an approved Microsoft login host')
   }
   return url.toString()
 }
@@ -75,14 +75,14 @@ export function normalizeExternalIdpCredentials(raw: unknown): ExternalIdpCreden
     try {
       parsed = JSON.parse(raw) as unknown
     } catch (error: unknown) {
-      throw new Error('dsh-kiro: external IdP credential JSON is invalid', { cause: error })
+      throw new Error('kiro-nest: external IdP credential JSON is invalid', { cause: error })
     }
   }
   const value = record(parsed)
-  if (value === undefined) throw new Error('dsh-kiro: external IdP credential JSON is required')
+  if (value === undefined) throw new Error('kiro-nest: external IdP credential JSON is required')
   const method = text(value.authMethod ?? value.auth_method)
   if (method !== undefined && method !== 'external_idp') {
-    throw new Error('dsh-kiro: imported credential is not external_idp auth')
+    throw new Error('kiro-nest: imported credential is not external_idp auth')
   }
   const accessToken = text(value.accessToken ?? value.access_token)
   const refreshToken = text(value.refreshToken ?? value.refresh_token)
@@ -90,12 +90,12 @@ export function normalizeExternalIdpCredentials(raw: unknown): ExternalIdpCreden
   const tokenEndpoint = text(value.tokenEndpoint ?? value.token_endpoint)
   const profileArn = text(value.profileArn ?? value.profile_arn)
   const scope = scopes(value.scope ?? value.scopes)
-  if (accessToken === undefined) throw new Error('dsh-kiro: external IdP access_token is required')
-  if (refreshToken === undefined) throw new Error('dsh-kiro: external IdP refresh_token is required')
-  if (clientId === undefined) throw new Error('dsh-kiro: external IdP client_id is required')
-  if (tokenEndpoint === undefined) throw new Error('dsh-kiro: external IdP token_endpoint is required')
-  if (profileArn === undefined) throw new Error('dsh-kiro: external IdP profile_arn is required')
-  if (scope === undefined) throw new Error('dsh-kiro: external IdP scopes are required')
+  if (accessToken === undefined) throw new Error('kiro-nest: external IdP access_token is required')
+  if (refreshToken === undefined) throw new Error('kiro-nest: external IdP refresh_token is required')
+  if (clientId === undefined) throw new Error('kiro-nest: external IdP client_id is required')
+  if (tokenEndpoint === undefined) throw new Error('kiro-nest: external IdP token_endpoint is required')
+  if (profileArn === undefined) throw new Error('kiro-nest: external IdP profile_arn is required')
+  if (scope === undefined) throw new Error('kiro-nest: external IdP scopes are required')
   const explicitExpiry = text(value.expiresAt ?? value.expires_at ?? value.expired)
   const expiresIn = Number(value.expiresIn ?? value.expires_in)
   const expiresAt = explicitExpiry !== undefined && Number.isFinite(Date.parse(explicitExpiry))

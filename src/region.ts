@@ -9,6 +9,6 @@ const REGION = /^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$/u
  */
 export function assertKiroRegion(value: string): string {
   const region = value.trim().toLowerCase()
-  if (!REGION.test(region)) throw new Error(`dsh-kiro: invalid AWS region "${value}"`)
+  if (!REGION.test(region)) throw new Error(`kiro-nest: invalid AWS region "${value}"`)
   return region
 }

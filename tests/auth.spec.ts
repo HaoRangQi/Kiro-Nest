@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearTokenCache, resolveTokenFromDirectories } from '../src/auth.ts'
-import { kiroRequestEndpoint } from '../src/adapter.ts'
+import { kiroRequestEndpoint } from '../src/client.ts'
 
 const temporaryDirectories: string[] = []
 
@@ -13,7 +13,7 @@ afterEach(async () => {
 })
 
 async function credentialDirectory(value: Record<string, unknown>): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'dsh-kiro-auth-'))
+  const directory = await mkdtemp(join(tmpdir(), 'kiro-nest-auth-'))
   temporaryDirectories.push(directory)
   await writeFile(join(directory, 'kiro-auth-token.json'), JSON.stringify(value), { mode: 0o600 })
   return directory

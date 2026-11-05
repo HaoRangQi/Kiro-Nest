@@ -1,5 +1,5 @@
 /**
- * Translate Kiro event-stream frames into the harness `StreamChunk` protocol.
+ * Translate Kiro event-stream frames into the gateway `ChatChunk` protocol.
  *
  * Kiro reports legacy thinking inside the same text channel as visible output,
  * delimited by `<thinking>` markers, and open-weight routes additionally leak
@@ -15,11 +15,11 @@
  * falls back to inference — `tool-calls` when the model opened any tool call,
  * `stop` otherwise, and `EMPTY_RESPONSE` for a stream with no content at all.
  *
- * @module dsh-kiro/translate
+ * @module kiro-nest/translate
  */
 
-import { CONTEXT_WINDOW_EXCEEDED_CODE, ToolCallId, ToolCallId as CallId, EMPTY_RESPONSE_CODE, LlmError } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, KiroError } from './errors.ts'
+import type { ChatChunk, ChatContentBlockResult, ChatFinishReason, ChatUsage } from './chat.ts'
 import type {
   WireAssistantResponseEvent,
   WireContextUsageEvent,
@@ -119,7 +119,7 @@ function heldSuffixLength(buffer: string, tokens: readonly string[]): number {
 }
 
 /**
- * Routes Kiro's single text channel into harness text and reasoning runs.
+ * Routes Kiro's single text channel into gateway text and reasoning runs.
  *
  * Marker recognition is stateful across frames, which is the point: a delta
  * boundary inside `</thinking>` must not surface the tag as visible output.
@@ -190,7 +190,7 @@ export class TextRouter {
   }
 }
 
-/** One harness block under assembly. */
+/** One gateway block under assembly. */
 interface OpenBlock {
   index: number
   kind: 'text' | 'reasoning' | 'tool-call'
@@ -199,14 +199,14 @@ interface OpenBlock {
   name?: string
 }
 
-/** Assemble the final ContentBlock for one open block. */
-function closeBlock(block: OpenBlock): ContentBlock {
+/** Assemble the final ChatContentBlockResult for one open block. */
+function closeBlock(block: OpenBlock): ChatContentBlockResult {
   switch (block.kind) {
     case 'text': return { type: 'text', text: block.text }
     case 'reasoning': return { type: 'reasoning', text: block.text }
     case 'tool-call': return {
       type: 'tool-call',
-      id: CallId(block.callId ?? ''),
+      id: block.callId ?? '',
       name: block.name ?? '',
       arguments: block.text,
     }
@@ -217,18 +217,18 @@ function closeBlock(block: OpenBlock): ContentBlock {
  * Parse one frame payload as JSON.
  * @param frame - the decoded frame.
  * @returns the parsed event.
- * @throws `LlmError('MALFORMED_RESPONSE')` when the payload is not JSON.
+ * @throws `KiroError('MALFORMED_RESPONSE')` when the payload is not JSON.
  */
 function parsePayload<T>(frame: WireFrame): T {
   const text = new TextDecoder().decode(frame.payload)
   try {
     return JSON.parse(text) as T
   } catch {
-    throw new LlmError(`malformed Kiro event payload: ${text.slice(0, 120)}`, 'MALFORMED_RESPONSE')
+    throw new KiroError(`malformed Kiro event payload: ${text.slice(0, 120)}`, 'MALFORMED_RESPONSE')
   }
 }
 
-/** Accept one provider counter only when it is safe for DSH's usage schema. */
+/** Accept one provider counter only when it is safe for gateway's usage schema. */
 function tokenCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
@@ -236,16 +236,16 @@ function tokenCount(value: unknown): number | undefined {
 }
 
 /**
- * Convert Kiro's disjoint token buckets to DSH's native usage vocabulary.
+ * Convert Kiro's disjoint token buckets to gateway's native usage vocabulary.
  *
  * Missing counters are zero, matching Kiro CLI's own stream parser, and a
  * present malformed counter rejects the event instead of publishing misleading
  * data. `totalTokens` is used only to recover the uncached input when the
  * provider reports the total without that bucket. An event with no non-zero
- * counter publishes nothing at all: usage DSH never received must read as
+ * counter publishes nothing at all: usage gateway never received must read as
  * unavailable, not as zero.
  */
-function tokenUsageOf(value: WireTokenUsage | undefined): TokenUsage | undefined {
+function tokenUsageOf(value: WireTokenUsage | undefined): ChatUsage | undefined {
   if (value === undefined || typeof value !== 'object' || value === null) return undefined
   const fields = [
     value.uncachedInputTokens,
@@ -283,7 +283,7 @@ function tokenUsageOf(value: WireTokenUsage | undefined): TokenUsage | undefined
  * traffic never received one — but it does send `contextUsageEvent` on every
  * request, and the wire schema treats `contextUsagePercentage` as part of token
  * accounting. Scaling it by the model's advertised window recovers the absolute
- * input size, which is what the harness needs to know how full the window is:
+ * input size, which is what the gateway needs to know how full the window is:
  * without any usage the token meter has no provider anchor and prices the whole
  * conversation from a local heuristic, so its compaction thresholds drift.
  *
@@ -301,7 +301,7 @@ export function contextUsageTokens(
   percentage: number | undefined,
   contextWindow: number | undefined,
   outputCharacters: number,
-): TokenUsage | undefined {
+): ChatUsage | undefined {
   if (percentage === undefined || contextWindow === undefined) return undefined
   if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) return undefined
   if (!Number.isInteger(contextWindow) || contextWindow <= 0) return undefined
@@ -340,7 +340,7 @@ function refusalDetail(details: WireStopDetails | undefined): string {
 }
 
 /**
- * Map one provider stop reason to the harness finish reason.
+ * Map one provider stop reason to the gateway finish reason.
  *
  * Terminal protocol semantics are the provider's to state: a turn cut off by an
  * output cap, an exhausted context, or a refusal must not be reported as a
@@ -356,7 +356,7 @@ export function finishReasonOf(
   reason: string | undefined,
   details: WireStopDetails | undefined,
   sawToolCalls: boolean,
-): FinishReason | undefined {
+): ChatFinishReason | undefined {
   if (reason === undefined || reason.trim().length === 0) return undefined
   switch (normalizeStopReason(reason)) {
     case 'END_TURN':
@@ -411,16 +411,16 @@ export function finishReasonOf(
 }
 
 /**
- * Translate decoded frames into harness chunks.
+ * Translate decoded frames into gateway chunks.
  * @param frames - decoded event-stream frames in arrival order.
  * @returns deltas as they arrive, every `block-end`, exact terminal `usage`
  *   when supplied by Kiro, then one `finish`.
- * @throws `LlmError` for an in-band service exception frame or a malformed payload.
+ * @throws `KiroError` for an in-band service exception frame or a malformed payload.
  */
 export async function* translate(
   frames: AsyncIterable<WireFrame>,
   contextWindow?: number,
-): AsyncGenerator<StreamChunk> {
+): AsyncGenerator<ChatChunk> {
   const router = new TextRouter()
   const guard = new LegacyMarkerGuard()
   const order: OpenBlock[] = []
@@ -428,7 +428,7 @@ export async function* translate(
   let nextIndex = 0
   let textBlock: OpenBlock | undefined
   let reasoningBlock: OpenBlock | undefined
-  let usage: TokenUsage | undefined
+  let usage: ChatUsage | undefined
   let stopReason: string | undefined
   let stopDetails: WireStopDetails | undefined
   let contextPercentage: number | undefined
@@ -440,7 +440,7 @@ export async function* translate(
     return block
   }
 
-  function* emitText(text: string): Generator<StreamChunk> {
+  function* emitText(text: string): Generator<ChatChunk> {
     outputCharacters += text.length
     if (textBlock === undefined) {
       textBlock = open('text')
@@ -450,7 +450,7 @@ export async function* translate(
     yield { type: 'text-delta', index: textBlock.index, text }
   }
 
-  function* emitReasoning(text: string): Generator<StreamChunk> {
+  function* emitReasoning(text: string): Generator<ChatChunk> {
     outputCharacters += text.length
     if (reasoningBlock === undefined) {
       reasoningBlock = open('reasoning')
@@ -460,7 +460,7 @@ export async function* translate(
     yield { type: 'reasoning-delta', index: reasoningBlock.index, text }
   }
 
-  function* route(runs: Routed[]): Generator<StreamChunk> {
+  function* route(runs: Routed[]): Generator<ChatChunk> {
     for (const run of runs) {
       if (run.channel === 'reasoning') {
         yield* emitReasoning(run.text)
@@ -475,7 +475,7 @@ export async function* translate(
     const exception = frame.headers[':exception-type']
     if (exception !== undefined) {
       const detail = new TextDecoder().decode(frame.payload)
-      throw new LlmError(`Kiro service exception ${exception}: ${detail.slice(0, 300)}`, exception)
+      throw new KiroError(`Kiro service exception ${exception}: ${detail.slice(0, 300)}`, exception)
     }
     switch (frame.headers[':event-type']) {
       case 'assistantResponseEvent': {
@@ -490,7 +490,7 @@ export async function* translate(
       case 'reasoningContentEvent': {
         const event = parsePayload<WireReasoningContentEvent>(frame)
         // Native reasoning arrives out of band, so it bypasses the in-band
-        // marker scanner entirely. `signature` and `redactedContent` have no DSH
+        // marker scanner entirely. `signature` and `redactedContent` have no gateway
         // representation; they are consumed silently rather than shown as prose.
         if (typeof event.text === 'string' && event.text.length > 0) {
           yield* emitReasoning(event.text)
@@ -512,7 +512,7 @@ export async function* translate(
         yield {
           type: 'tool-call-delta',
           index: block.index,
-          id: CallId(event.toolUseId),
+          id: event.toolUseId,
           ...block.name === undefined ? {} : { name: block.name },
           argumentsDelta: fragment,
         }
@@ -546,7 +546,7 @@ export async function* translate(
       }
       default:
         // meteringEvent, followupPrompt, and future events carry no additional
-        // harness vocabulary; the protocol grows by adding cases here, never by
+        // gateway vocabulary; the protocol grows by adding cases here, never by
         // surfacing unknown frames as content.
         break
     }
@@ -559,7 +559,7 @@ export async function* translate(
     yield { type: 'block-end', index: block.index, block: closeBlock(block) }
   }
   const provided = finishReasonOf(stopReason, stopDetails, toolBlocks.size > 0)
-  const reason: FinishReason = provided ?? (toolBlocks.size > 0
+  const reason: ChatFinishReason = provided ?? (toolBlocks.size > 0
     ? { kind: 'tool-calls' }
     : order.length > 0
       ? { kind: 'stop' }
@@ -572,7 +572,7 @@ export async function* translate(
       })
   // A provider that named a normal stop but produced nothing is still an empty
   // response: the loop needs something to act on, and the attempt is repeatable.
-  const settled: FinishReason = order.length === 0
+  const settled: ChatFinishReason = order.length === 0
     && (reason.kind === 'stop' || reason.kind === 'tool-calls')
     ? {
       kind: 'error',

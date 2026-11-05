@@ -1,7 +1,7 @@
 /** Cached Kiro account usage retrieval through the control-plane API. */
 
-import { LlmError } from '@deepseek-ai/dsh-llm'
-import type { KiroConnectionOptions } from './adapter.ts'
+import { KiroError } from './errors.ts'
+import type { KiroConnectionOptions } from './connection.ts'
 import type { KiroAuthMethod, KiroToken } from './auth.ts'
 import { getJson, postJsonWithHeaders } from './transport.ts'
 
@@ -241,12 +241,14 @@ function headers(token: KiroToken): Record<string, string> {
 
 /** Account-scoped five-minute usage cache with forced refresh support. */
 export class KiroUsageService {
+  private readonly options: KiroUsageServiceOptions
   private readonly getRequest: UsageGetRequest
   private readonly postRequest: UsagePostRequest
   private readonly cacheTtlMs: number
   private readonly cache = new Map<string, CacheEntry>()
 
-  constructor(private readonly options: KiroUsageServiceOptions) {
+  constructor(options: KiroUsageServiceOptions) {
+    this.options = options
     this.getRequest = options.getRequest ?? getJson
     this.postRequest = options.postRequest ?? postJsonWithHeaders
     this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
@@ -337,7 +339,7 @@ export class KiroUsageService {
         : lastStatus === 429 ? 'RATE_LIMIT'
           : lastStatus >= 500 ? 'SERVER'
             : 'TRANSPORT'
-    throw new LlmError(
+    throw new KiroError(
       lastStatus > 0
         ? `Kiro usage is temporarily unavailable (HTTP ${lastStatus})`
         : 'Kiro usage is temporarily unavailable',

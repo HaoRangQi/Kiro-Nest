@@ -1,5 +1,5 @@
 /**
- * Serialize harness messages into a Kiro `generateAssistantResponse` request.
+ * Serialize chat messages into a Kiro `generateAssistantResponse` request.
  *
  * Three properties of the wire operation drive the whole translation:
  *
@@ -17,12 +17,14 @@
  * - History is capped by entry count, not tokens: past the cap the service
  *   answers `Input is too long.`, so the oldest entries fold into one text turn.
  *
- * @module dsh-kiro/serialize
+ * @module kiro-nest/serialize
  */
 
 import { createHash } from 'node:crypto'
-import { contentHasImage, LlmError } from '@deepseek-ai/dsh-llm'
-import type { AssistantMessage, ContentBlock, GenerateOptions, RequestMessage, ToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { contentHasImage } from './chat.ts'
+import type { ChatContentBlock, ChatImage, ChatMessage, ChatRequest, ChatToolSchema } from './chat.ts'
+import { KiroError } from './errors.ts'
+import type { RequestDefaults } from './connection.ts'
 import type {
   WireHistoryEntry,
   WireImageBlock,
@@ -48,7 +50,7 @@ export const CONTINUE_PADDING = 'Continue'
 export const ACKNOWLEDGE_PADDING = 'understood'
 /**
  * The distinctive placeholder earlier versions used for structural padding.
- * It looked like an injected system message, so the model imitated it and DSH
+ * It looked like an injected system message, so the model imitated it and gateway
  * persisted the imitation as visible assistant output. Sessions recorded before
  * the fix still contain it, so replayed history is scrubbed of exact matches
  * rather than replaying them into the model's context again.
@@ -77,20 +79,12 @@ const TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const TOOL_USE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
- * Map a harness tool-call id onto one Kiro accepts. Deterministic, so a call
+ * Map a gateway tool-call id onto one Kiro accepts. Deterministic, so a call
  * and its result still pair and the replayed prefix stays cache-stable.
  */
 export function wireToolUseId(id: string): string {
   if (TOOL_USE_ID_PATTERN.test(id)) return id
   return `tooluse_${createHash('sha256').update(id).digest('base64url').slice(0, 32)}`
-}
-
-/** Adapter-level request defaults resolved from plugin config. */
-export interface RequestDefaults {
-  /** Deployment thinking policy; `disabled` refuses every request-level enable. */
-  thinking?: 'enabled' | 'disabled' | undefined
-  /** Default thinking effort when a request names none. */
-  reasoningEffort?: string | undefined
 }
 
 /** Live model-specific effort contract returned by ListAvailableModels. */
@@ -117,7 +111,7 @@ const THINKING_BUDGETS = { low: 4_000, medium: 12_000, high: 24_000 } as const
  * Validate the adapter-owned effort.
  * @param effort - the request's opaque effort identifier.
  * @returns the same value, narrowed.
- * @throws `LlmError('UNSUPPORTED_REASONING_EFFORT')` for any other value.
+ * @throws `KiroError('UNSUPPORTED_REASONING_EFFORT')` for any other value.
  */
 function narrowLegacyEffort(
   effort: string,
@@ -125,19 +119,19 @@ function narrowLegacyEffort(
   if (effort === 'off' || effort === 'low' || effort === 'medium' || effort === 'high') {
     return effort as 'off' | 'low' | 'medium' | 'high'
   }
-  throw new LlmError(`Kiro does not support reasoning effort "${effort}"`, 'UNSUPPORTED_REASONING_EFFORT')
+  throw new KiroError(`Kiro does not support reasoning effort "${effort}"`, 'UNSUPPORTED_REASONING_EFFORT')
 }
 
 /**
  * Resolve the effort governing one request.
- * @param options - the harness request.
+ * @param options - the gateway request.
  * @param defaults - adapter-level defaults.
  * @returns the effort, or `off` when thinking is not in play.
- * @throws `LlmError('UNSUPPORTED_REASONING_EFFORT')` when a deployment that
+ * @throws `KiroError('UNSUPPORTED_REASONING_EFFORT')` when a deployment that
  *   disabled thinking is asked to enable it.
  */
 function resolveEffort(
-  options: GenerateOptions,
+  options: ChatRequest,
   defaults: RequestDefaults,
   native?: NativeEffortConfig,
 ): string | undefined {
@@ -148,7 +142,7 @@ function resolveEffort(
     : String(options.reasoningEffort)
   if (defaults.thinking === 'disabled' && requested !== undefined
     && requested !== 'off' && requested !== 'none') {
-    throw new LlmError(
+    throw new KiroError(
       `Kiro deployment does not support reasoning effort "${requested}"`,
       'UNSUPPORTED_REASONING_EFFORT',
     )
@@ -157,7 +151,7 @@ function resolveEffort(
   if (native !== undefined) {
     if (requested === undefined) return undefined
     if (!native.levels.includes(requested)) {
-      throw new LlmError(
+      throw new KiroError(
         `Kiro model does not advertise reasoning effort "${requested}"`,
         'UNSUPPORTED_REASONING_EFFORT',
       )
@@ -169,12 +163,12 @@ function resolveEffort(
 
 /**
  * Build the system text Kiro sees, including thinking markers.
- * @param options - the harness request.
+ * @param options - the gateway request.
  * @param effort - the resolved effort.
  * @returns the system text, empty when there is nothing to say.
  */
 function systemText(
-  options: GenerateOptions,
+  options: ChatRequest,
   effort: string | undefined,
   native?: NativeEffortConfig,
 ): string {
@@ -218,7 +212,7 @@ export function buildEffortRequestFields(
  * @param maxTokens - the caller's requested output cap, if any.
  * @param limits - the model's advertised field bounds.
  * @returns the object to send, or `undefined` when there is nothing valid to send.
- * @throws `LlmError('INVALID_REQUEST')` for an unusable caller value.
+ * @throws `KiroError('INVALID_REQUEST')` for an unusable caller value.
  */
 export function buildModelRequestFields(
   effort: string | undefined,
@@ -231,7 +225,7 @@ export function buildModelRequestFields(
   const fields: Record<string, unknown> = { ...buildEffortRequestFields(effort, native) }
   if (maxTokens !== undefined) {
     if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
-      throw new LlmError(
+      throw new KiroError(
         `Kiro requires a positive integer maxTokens; received ${String(maxTokens)}`,
         'INVALID_REQUEST',
       )
@@ -255,7 +249,7 @@ export function buildModelRequestFields(
  * multiplies it through history. Only a block whose entire text is the marker is
  * dropped, so a message discussing the phrase in prose keeps it verbatim.
  */
-function flattenText(blocks: readonly ContentBlock[]): string {
+function flattenText(blocks: readonly ChatContentBlock[]): string {
   return blocks
     .filter(block => block.type === 'text')
     .filter(block => block.text.trim() !== LEGACY_CONTINUATION)
@@ -263,18 +257,23 @@ function flattenText(blocks: readonly ContentBlock[]): string {
     .join('')
 }
 
-/** Wire images for one request, keyed by the attachment they were read from. */
-export type PreparedImages = ReadonlyMap<string, WireImageBlock>
+/** Media types Kiro's `ImageFormat` enum accepts, mapped to its own spelling. */
+const IMAGE_FORMATS: Record<ChatImage['mediaType'], WireImageBlock['format']> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpeg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+}
 
 /**
  * Reject images in a role whose wire message has nowhere to put them.
  * @param blocks - blocks from one message.
  * @param role - the role being serialized, named in the error.
- * @throws `LlmError('UNSUPPORTED_CONTENT')` when the role carries an image.
+ * @throws `KiroError('UNSUPPORTED_CONTENT')` when the role carries an image.
  */
-function assertNoImages(blocks: readonly ContentBlock[], role: string): void {
+function assertNoImages(blocks: readonly ChatContentBlock[], role: string): void {
   if (contentHasImage(blocks)) {
-    throw new LlmError(
+    throw new KiroError(
       `Kiro accepts images only on user turns; this request has one on a ${role} turn.`,
       'UNSUPPORTED_CONTENT',
     )
@@ -287,42 +286,34 @@ function assertNoImages(blocks: readonly ContentBlock[], role: string): void {
  * Tool-role content is passed through the same image collection as user
  * content; the service has no separate image seat for a tool result.
  * @param blocks - blocks from one user message.
- * @param prepared - wire images already read for this request.
  * @returns wire image blocks in the order they appear.
- * @throws `LlmError('INVALID_REQUEST')` when a block was never prepared.
+ * @throws `KiroError('UNSUPPORTED_CONTENT')` for a media type Kiro cannot accept.
  */
-function imagesOf(
-  blocks: readonly ContentBlock[],
-  prepared: PreparedImages,
-): WireImageBlock[] {
+function imagesOf(blocks: readonly ChatContentBlock[]): WireImageBlock[] {
   const images: WireImageBlock[] = []
-  const walk = (content: readonly ContentBlock[]): void => {
-    for (const block of content) {
-      if (block.type === 'image') {
-        const image = prepared.get(block.attachment.attachmentId)
-        if (image === undefined) {
-          throw new LlmError(
-            `Kiro request image ${block.attachment.attachmentId} was not prepared.`,
-            'INVALID_REQUEST',
-          )
-        }
-        images.push(image)
-      }
+  for (const block of blocks) {
+    if (block.type !== 'image') continue
+    const format = IMAGE_FORMATS[block.image.mediaType]
+    if (format === undefined) {
+      throw new KiroError(
+        `Kiro accepts png, jpeg, gif and webp images; ${String(block.image.mediaType)} is not one of them.`,
+        'UNSUPPORTED_CONTENT',
+      )
     }
+    images.push({ format, source: { bytes: block.image.data } })
   }
-  walk(blocks)
   return images
 }
 
 /**
  * Validate one tool name against the wire pattern.
- * @param name - the harness tool name.
+ * @param name - the gateway tool name.
  * @returns the same name.
- * @throws `LlmError('UNSUPPORTED_TOOL_NAME')` when Kiro would reject it.
+ * @throws `KiroError('UNSUPPORTED_TOOL_NAME')` when Kiro would reject it.
  */
 function assertToolName(name: string): string {
   if (!TOOL_NAME_PATTERN.test(name)) {
-    throw new LlmError(
+    throw new KiroError(
       `Kiro rejects tool name "${name}"; names must match ${String(TOOL_NAME_PATTERN)}`,
       'UNSUPPORTED_TOOL_NAME',
     )
@@ -331,7 +322,10 @@ function assertToolName(name: string): string {
 }
 
 /** Serialize the tool-result blocks of one message. */
-function toolResultsOf(message: ToolResultMessage): WireToolResult[] {
+function toolResultsOf(message: ChatMessage): WireToolResult[] {
+  if (message.toolCallId === undefined) {
+    throw new KiroError('Kiro tool result is missing its tool call id', 'INVALID_REQUEST')
+  }
   return [{
     toolUseId: wireToolUseId(message.toolCallId),
     // Empty tool output still needs content on the wire.
@@ -341,13 +335,13 @@ function toolResultsOf(message: ToolResultMessage): WireToolResult[] {
 }
 
 /** Serialize the tool-call blocks of one assistant message. */
-function toolUsesOf(message: AssistantMessage): WireToolUse[] {
+function toolUsesOf(message: ChatMessage): WireToolUse[] {
   return message.content
     .filter(block => block.type === 'tool-call')
     .map(block => ({
       toolUseId: wireToolUseId(block.id),
       name: assertToolName(block.name),
-      // Kiro takes parsed arguments; the harness carries the model's raw JSON
+      // Kiro takes parsed arguments; the caller carries the model's raw JSON
       // string. Unparsable arguments reach the model as text below.
       input: parseArguments(block.arguments),
     }))
@@ -377,15 +371,14 @@ interface UserTurn {
 }
 
 /**
- * Fold the harness conversation into alternating user and assistant turns.
+ * Fold the gateway conversation into alternating user and assistant turns.
  * Consecutive same-role messages merge, because Kiro accepts only strict
  * alternation.
- * @param messages - the harness conversation, in order.
+ * @param messages - the gateway conversation, in order.
  * @returns the folded turns, each tagged with its role.
  */
 function foldTurns(
-  messages: readonly RequestMessage[],
-  images: PreparedImages,
+  messages: readonly ChatMessage[],
 ): (
   | { role: 'user'; turn: UserTurn }
   | { role: 'assistant'; text: string; toolUses: WireToolUse[] }
@@ -412,7 +405,7 @@ function foldTurns(
     // text; Kiro has no system slot and developer tool changes are empty.
     const toolResults = message.role === 'tool' ? toolResultsOf(message) : []
     const messageText = message.role === 'tool' ? '' : text
-    const turnImages = imagesOf(message.content, images)
+    const turnImages = imagesOf(message.content)
     const last = turns.at(-1)
     if (last?.role === 'user') {
       last.turn.text = [last.turn.text, messageText].filter(part => part.length > 0).join('\n\n')
@@ -457,7 +450,7 @@ function resultText(result: WireToolResult): string {
 /**
  * Fold the oldest history entries into one text turn once history passes the
  * service cap. Content is kept, not dropped: only its structure changes, and
- * deciding what the conversation holds stays with the harness's compaction.
+ * deciding what the conversation holds stays with the gateway's compaction.
  * @param history - alternating history starting on a user entry and ending on an assistant one; edited in place.
  * @param model - the wire model id for the folded user turn.
  */
@@ -505,39 +498,37 @@ function foldOverflow(history: WireHistoryEntry[], model: string): void {
  * everything before it becomes alternating history. A conversation whose last
  * turn is the assistant's (a resumed session, a compaction boundary) gets a
  * neutral continuation user turn so there is something to answer.
- * @param options - the harness request.
+ * @param options - the gateway request.
  * @param defaults - adapter-level thinking defaults.
  * @param conversationId - identifier for this request's conversation.
  * @param profileArn - CodeWhisperer profile the account bills against.
  * @param nativeEffort - live effort levels and their provider request path.
  * @param limits - live per-model generation bounds, when discovery supplied them.
- * @param images - wire images already read for this request, by attachment id.
  * @returns the request body.
- * @throws `LlmError` when an image cannot be placed, a tool name is unusable,
+ * @throws `KiroError` when an image cannot be placed, a tool name is unusable,
  *   an effort is unsupported, a generation option is unusable, or there are no
  *   messages at all.
  */
 export function serializeRequest(
-  options: GenerateOptions,
+  options: ChatRequest,
   defaults: RequestDefaults,
   conversationId: string,
   profileArn?: string,
   nativeEffort?: NativeEffortConfig,
   limits?: ModelLimits,
-  images: PreparedImages = new Map(),
 ): WireRequest {
   if (options.messages.length === 0) {
-    throw new LlmError('Kiro requires at least one message', 'INVALID_REQUEST')
+    throw new KiroError('Kiro requires at least one message', 'INVALID_REQUEST')
   }
   const effort = resolveEffort(options, defaults, nativeEffort)
-  const turns = foldTurns(options.messages, images)
+  const turns = foldTurns(options.messages)
   if (turns.at(-1)?.role === 'assistant') {
     turns.push({ role: 'user', turn: { text: CONTINUE_PADDING, toolResults: [], images: [] } })
   }
   const current = turns.pop()
   /* v8 ignore next -- a non-empty conversation always folds to at least one turn */
   if (current === undefined || current.role !== 'user') {
-    throw new LlmError('Kiro request has no user turn to answer', 'INVALID_REQUEST')
+    throw new KiroError('Kiro request has no user turn to answer', 'INVALID_REQUEST')
   }
 
   const history: WireHistoryEntry[] = []

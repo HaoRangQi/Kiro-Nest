@@ -2,8 +2,7 @@
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { KiroCatalogModel } from './adapter.ts'
-import { credentialDirectory } from './paths.ts'
+import type { KiroCatalogModel } from './connection.ts'
 
 const MODEL_SETTINGS_FILE = 'model-settings.json'
 
@@ -11,6 +10,15 @@ export interface KiroModelSettings {
   enabledModelIds: readonly string[]
   knownModelIds: readonly string[]
   updatedAt: number
+}
+
+/** Default file used when a caller does not name one. */
+function defaultSettingsFile(): string {
+  const dataDir = process.env.KIRO_NEST_DATA_DIR
+  const root = dataDir !== undefined && dataDir.trim().length > 0
+    ? join(dataDir, 'storages', 'kiro-auth')
+    : join(process.cwd(), 'data', 'storages', 'kiro-auth')
+  return join(root, MODEL_SETTINGS_FILE)
 }
 
 function validIds(value: unknown): string[] {
@@ -32,9 +40,9 @@ function normalize(value: unknown): KiroModelSettings {
   }
 }
 
-/** Default storage path; kept beside, but independent from, managed credentials. */
-export function modelSettingsPath(): string {
-  return join(credentialDirectory(), MODEL_SETTINGS_FILE)
+/** Default storage path inside the credential directory. */
+export function modelSettingsPath(directory: string): string {
+  return join(directory, MODEL_SETTINGS_FILE)
 }
 
 /** Sort models by family, newest numeric version, then preferred variant. */
@@ -82,8 +90,11 @@ export function compareKiroModels(a: KiroCatalogModel, b: KiroCatalogModel): num
 /** Serialize model-settings writes so concurrent checkbox changes cannot race. */
 export class FileModelSettingsStore {
   private chain: Promise<unknown> = Promise.resolve()
+  private readonly file: string
 
-  constructor(private readonly file = modelSettingsPath()) {}
+  constructor(file = defaultSettingsFile()) {
+    this.file = file
+  }
 
   async read(): Promise<KiroModelSettings> {
     try {

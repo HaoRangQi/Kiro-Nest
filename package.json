@@ -1,6 +1,6 @@
 {
-  "name": "dsh-kiro",
-  "description": "Kiro provider for DeepSeek Harness with multi-method login, usage, model controls, and token/profile refresh",
+  "name": "kiro-nest",
+  "description": "Kiro-nest: a standalone Kiro account gateway with OpenAI/Anthropic-compatible endpoints, multi-account login, usage, and a web settings page",
   "version": "0.1.20",
   "type": "module",
   "license": "MIT",
@@ -8,122 +8,49 @@
     "name": "Dat LQ.",
     "url": "https://github.com/dat-lequoc"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/dat-lequoc/dsh-kiro.git"
-  },
   "keywords": [
-    "deepseek-harness",
-    "dsh",
-    "dsh-plugin",
     "kiro",
-    "kiro-cli",
     "kiro2api",
-    "claude",
-    "opus",
     "oauth",
-    "reasoning"
+    "reasoning",
+    "openai",
+    "anthropic",
+    "gateway",
+    "proxy",
+    "docker"
   ],
-  "homepage": "https://github.com/dat-lequoc/dsh-kiro#readme",
-  "bugs": {
-    "url": "https://github.com/dat-lequoc/dsh-kiro/issues"
-  },
-  "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./lib/types/index.d.ts",
-      "default": "./lib/index.js"
-    },
-    "./client": "./client/index.cjs",
-    "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
-  },
+  "main": "lib/gateway/main.js",
   "files": [
+    "lib/gateway/main.js",
+    "web",
     "assets",
-    "lib/index.js",
-    "lib/types/**/*.d.ts",
-    "bin",
-    "client",
-    "cordis.patch.yml",
+    "bin/kiro-nest.mjs",
     "README.md",
     "README.zh.md",
     "NOTICE.md",
     "LICENSE"
   ],
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-model-selection",
-        "@deepseek-ai/dsh-client-locale"
-      ],
-      "platform": "web"
-    }
-  },
   "bin": {
-    "kiro-login": "bin/kiro-login.mjs"
+    "kiro-nest": "bin/kiro-nest.mjs"
   },
   "engines": {
     "node": "^22.19 || >=24"
   },
   "scripts": {
     "build": "tsc -b tsconfig.json && tsdown",
-    "check": "npm run typecheck && npm test && npm run build && node --check client/index.cjs && node --check bin/kiro-login.mjs",
+    "check": "npm run typecheck && npm test && npm run build && node --check lib/gateway/main.js",
+    "gateway": "node src/gateway/main.ts",
+    "gateway:dev": "node --watch src/gateway/main.ts",
+    "gateway:start": "node lib/gateway/main.js",
     "pack:dist": "mkdir -p dist && npm pack --pack-destination dist",
     "typecheck": "tsc -b tsconfig.json --noEmit false --emitDeclarationOnly",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-attachment": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-home-paths": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.2.0-rc.1",
-    "@deepseek-ai/dsh-util-values": "^0.2.0-rc.1"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-home-paths": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-host-webserver": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-llm": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-settings": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-timeout": {
-      "optional": true
-    }
-  },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
-  },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-timeout": "0.2.1-rc.2",
     "@types/node": "^22.10.0",
     "tsdown": "^0.15.6",
     "typescript": "^5.7.3",
-    "vitest": "^4.1.8",
-    "@deepseek-ai/dsh-util-values": "0.2.1-rc.2"
+    "vitest": "^4.1.8"
   }
 }

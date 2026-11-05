@@ -51,7 +51,7 @@ function credential(accessToken: string): Record<string, unknown> {
 
 describe('Kiro account store where a directory cannot be opened', () => {
   it('still stores an account when the directory fsync is unavailable', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-kiro-accounts-win-'))
+    const directory = await mkdtemp(join(tmpdir(), 'kiro-nest-accounts-win-'))
     temporaryDirectories.push(directory)
     simulated.directory = directory
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
